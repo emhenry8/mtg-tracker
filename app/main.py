@@ -1,4 +1,5 @@
 import csv
+import re
 
 from contextlib import asynccontextmanager
 from decimal import Decimal
@@ -32,6 +33,8 @@ from .database import get_db
 
 from .models import (
     Card,
+    Deck,
+    DeckCard,
     Inventory,
 )
 
@@ -192,6 +195,84 @@ def home(
     )
 
 
+def get_or_create_card(
+    db: Session,
+    set_code: str,
+    collector_number: str,
+):
+    """Look up a card by set + collector number, fetching it from
+    Scryfall and persisting it if we don't have it yet.
+
+    Returns the Card, or None if Scryfall has no such printing. Lets
+    network/HTTP errors from Scryfall propagate — callers decide how
+    to report those.
+    """
+
+    set_code = (
+        set_code
+        .upper()
+        .strip()
+    )
+
+    collector_number = (
+        collector_number
+        .strip()
+    )
+
+
+    card = (
+        db.query(Card)
+        .filter(
+            Card.set_code ==
+                set_code,
+
+            Card.collector_number ==
+                collector_number,
+        )
+        .first()
+    )
+
+
+    if card:
+
+        return card
+
+
+    scryfall_data = (
+        get_card_by_set_and_number(
+            set_code,
+            collector_number,
+        )
+    )
+
+
+    if not scryfall_data:
+
+        return None
+
+
+    card_data = (
+        extract_card_data(
+            scryfall_data
+        )
+    )
+
+
+    card = Card(
+        **card_data
+    )
+
+
+    db.add(card)
+
+    db.commit()
+
+    db.refresh(card)
+
+
+    return card
+
+
 def add_card_to_collection(
     db: Session,
     set_code: str,
@@ -238,60 +319,25 @@ def add_card_to_collection(
         return False, "Quantity must be at least 1"
 
 
-    card = (
-        db.query(Card)
-        .filter(
-            Card.set_code ==
-                set_code,
+    try:
 
-            Card.collector_number ==
-                collector_number,
+        card = get_or_create_card(
+            db,
+            set_code,
+            collector_number,
         )
-        .first()
-    )
+
+    except Exception:
+
+        return False, "Could not contact Scryfall"
 
 
     if not card:
 
-        try:
-
-            scryfall_data = (
-                get_card_by_set_and_number(
-                    set_code,
-                    collector_number,
-                )
-            )
-
-        except Exception:
-
-            return False, "Could not contact Scryfall"
-
-
-        if not scryfall_data:
-
-            return (
-                False,
-                f"Card not found: {set_code} #{collector_number}",
-            )
-
-
-        card_data = (
-            extract_card_data(
-                scryfall_data
-            )
+        return (
+            False,
+            f"Card not found: {set_code} #{collector_number}",
         )
-
-
-        card = Card(
-            **card_data
-        )
-
-
-        db.add(card)
-
-        db.commit()
-
-        db.refresh(card)
 
 
     inventory = (
@@ -651,70 +697,11 @@ def build_collection_query(
     return query
 
 
-@app.get("/collection")
-def collection(
-    request: Request,
-
-    search: str = "",
-
-    set_code: str = "",
-
-    card_type: str = "",
-
-    color: str = "",
-
-    rarity: str = "",
-
-    finish: str = "",
-
-    treatment: str = "",
-
-    view: str = "gallery",
-
-    sort: str = "date_added",
-
-    direction: str = "desc",
-
-    db: Session = Depends(get_db),
+def get_collection_filter_options(
+    db: Session,
 ):
-
-    if view not in ("card", "list", "gallery"):
-
-        view = "card"
-
-
-    inventory_rows = (
-        build_collection_query(
-            db,
-            search=search,
-            set_code=set_code,
-            card_type=card_type,
-            color=color,
-            rarity=rarity,
-            finish=finish,
-            treatment=treatment,
-            sort=sort,
-            direction=direction,
-        )
-        .all()
-    )
-
-
-    total_cards = sum(
-        row.quantity
-        for row in inventory_rows
-    )
-
-
-    total_value = sum(
-
-        inventory_price(row)
-        * row.quantity
-
-        for row in inventory_rows
-
-    )
-
+    """Distinct filter dropdown values shared by the collection page
+    and the deck builder's "add from collection" panel."""
 
     set_codes = [
         row[0]
@@ -783,6 +770,91 @@ def collection(
     ]
 
 
+    return {
+
+        "set_codes":
+            set_codes,
+
+        "rarities":
+            rarities,
+
+        "finishes":
+            finishes,
+
+        "treatments":
+            treatments,
+
+    }
+
+
+@app.get("/collection")
+def collection(
+    request: Request,
+
+    search: str = "",
+
+    set_code: str = "",
+
+    card_type: str = "",
+
+    color: str = "",
+
+    rarity: str = "",
+
+    finish: str = "",
+
+    treatment: str = "",
+
+    view: str = "gallery",
+
+    sort: str = "date_added",
+
+    direction: str = "desc",
+
+    db: Session = Depends(get_db),
+):
+
+    if view not in ("card", "list", "gallery"):
+
+        view = "card"
+
+
+    inventory_rows = (
+        build_collection_query(
+            db,
+            search=search,
+            set_code=set_code,
+            card_type=card_type,
+            color=color,
+            rarity=rarity,
+            finish=finish,
+            treatment=treatment,
+            sort=sort,
+            direction=direction,
+        )
+        .all()
+    )
+
+
+    total_cards = sum(
+        row.quantity
+        for row in inventory_rows
+    )
+
+
+    total_value = sum(
+
+        inventory_price(row)
+        * row.quantity
+
+        for row in inventory_rows
+
+    )
+
+
+    filter_options = get_collection_filter_options(db)
+
+
     return render_template(
 
         request,
@@ -800,19 +872,19 @@ def collection(
                 total_value,
 
             "set_codes":
-                set_codes,
+                filter_options["set_codes"],
 
             "rarities":
-                rarities,
+                filter_options["rarities"],
 
             "colors":
                 COLOR_OPTIONS,
 
             "finishes":
-                finishes,
+                filter_options["finishes"],
 
             "treatments":
-                treatments,
+                filter_options["treatments"],
 
             "filters": {
 
@@ -1048,6 +1120,708 @@ def export_collection_manabox_csv(
         headers={
             "Content-Disposition":
                 'attachment; filename="manabox_collection_import.csv"',
+        },
+    )
+
+
+DECK_SECTIONS = ("mainboard", "sideboard")
+
+
+def owned_quantity_for_card(
+    db: Session,
+    card_id: int,
+):
+    return (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    Inventory.quantity
+                ),
+                0,
+            )
+        )
+        .filter(
+            Inventory.card_id ==
+                card_id
+        )
+        .scalar()
+    )
+
+
+def slugify_deck_name(
+    name: str,
+):
+    slug = (
+        re.sub(
+            r"[^A-Za-z0-9]+",
+            "_",
+            name.strip(),
+        )
+        .strip("_")
+        .lower()
+    )
+
+    return slug or "deck"
+
+
+@app.get("/decks")
+def list_decks(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+
+    decks = (
+        db.query(Deck)
+        .order_by(
+            Deck.updated_at.desc()
+        )
+        .all()
+    )
+
+
+    deck_rows = []
+
+    for deck in decks:
+
+        mainboard_count = sum(
+            deck_card.quantity
+            for deck_card in deck.cards
+            if deck_card.section == "mainboard"
+        )
+
+        sideboard_count = sum(
+            deck_card.quantity
+            for deck_card in deck.cards
+            if deck_card.section == "sideboard"
+        )
+
+        deck_rows.append({
+            "deck": deck,
+            "mainboard_count": mainboard_count,
+            "sideboard_count": sideboard_count,
+        })
+
+
+    return render_template(
+        request,
+        "decks.html",
+        {
+            "deck_rows": deck_rows,
+        },
+    )
+
+
+@app.post("/decks")
+def create_deck(
+    name: str = Form(...),
+    notes: str = Form(""),
+    db: Session = Depends(get_db),
+):
+
+    deck = Deck(
+        name=name.strip() or "Untitled Deck",
+        notes=notes.strip() or None,
+    )
+
+    db.add(deck)
+
+    db.commit()
+
+    db.refresh(deck)
+
+
+    return RedirectResponse(
+        url=f"/decks/{deck.id}",
+        status_code=303,
+    )
+
+
+@app.get("/decks/import")
+def deck_import_form(
+    request: Request,
+):
+
+    return render_template(
+        request,
+        "deck_import.html",
+        {
+            "results": None,
+        },
+    )
+
+
+# Matches the MTGA/Arena-style decklist line format that Moxfield,
+# Archidekt, and ManaBox all export/import, e.g.:
+#   4 Lightning Bolt (M11) 146
+#   1 Sol Ring (C21) 263 *F*
+DECK_LINE_RE = re.compile(
+    r"^(\d+)x?\s+(.+?)\s*\(([A-Za-z0-9]{2,6})\)\s*(\S+?)\s*(?:\*[A-Za-z]+\*)?$"
+)
+
+SECTION_HEADER_RE = re.compile(
+    r"^(deck|mainboard|sideboard|commander)\s*:?\s*$",
+    re.IGNORECASE,
+)
+
+
+@app.post("/decks/import")
+def deck_import(
+    request: Request,
+    name: str = Form(...),
+    decklist: str = Form(...),
+    db: Session = Depends(get_db),
+):
+
+    deck = Deck(
+        name=name.strip() or "Imported Deck",
+    )
+
+    db.add(deck)
+
+    db.commit()
+
+    db.refresh(deck)
+
+
+    section = "mainboard"
+
+    results = []
+
+    for raw_line in decklist.splitlines():
+
+        line = raw_line.strip()
+
+        if not line:
+
+            continue
+
+
+        header_match = (
+            SECTION_HEADER_RE.match(line)
+        )
+
+        if header_match:
+
+            header = header_match.group(1).lower()
+
+            section = (
+                "sideboard"
+                if header == "sideboard"
+                else "mainboard"
+            )
+
+            continue
+
+
+        match = DECK_LINE_RE.match(line)
+
+        if not match:
+
+            results.append({
+                "line": line,
+                "success": False,
+                "message": "Could not parse line",
+            })
+
+            continue
+
+
+        quantity_str, _name_hint, set_code, collector_number = (
+            match.groups()
+        )
+
+        quantity = int(quantity_str)
+
+
+        try:
+
+            card = get_or_create_card(
+                db,
+                set_code,
+                collector_number,
+            )
+
+        except Exception:
+
+            results.append({
+                "line": line,
+                "success": False,
+                "message": "Could not contact Scryfall",
+            })
+
+            continue
+
+
+        if not card:
+
+            results.append({
+                "line": line,
+                "success": False,
+                "message":
+                    f"Card not found: {set_code} #{collector_number}",
+            })
+
+            continue
+
+
+        deck_card = (
+            db.query(DeckCard)
+            .filter(
+                DeckCard.deck_id == deck.id,
+                DeckCard.card_id == card.id,
+                DeckCard.section == section,
+            )
+            .first()
+        )
+
+        if deck_card:
+
+            deck_card.quantity += quantity
+
+        else:
+
+            db.add(
+                DeckCard(
+                    deck_id=deck.id,
+                    card_id=card.id,
+                    section=section,
+                    quantity=quantity,
+                )
+            )
+
+        db.commit()
+
+        results.append({
+            "line": line,
+            "success": True,
+            "message": f"Added {quantity}x {card.name} to {section}",
+        })
+
+
+    if any(not result["success"] for result in results):
+
+        return render_template(
+            request,
+            "deck_import.html",
+            {
+                "results": results,
+                "deck_id": deck.id,
+            },
+        )
+
+
+    return RedirectResponse(
+        url=f"/decks/{deck.id}",
+        status_code=303,
+    )
+
+
+@app.get("/decks/{deck_id}")
+def deck_detail(
+    request: Request,
+    deck_id: int,
+    search: str = "",
+    set_code: str = "",
+    card_type: str = "",
+    color: str = "",
+    rarity: str = "",
+    finish: str = "",
+    treatment: str = "",
+    db: Session = Depends(get_db),
+):
+
+    deck = (
+        db.query(Deck)
+        .filter(Deck.id == deck_id)
+        .first()
+    )
+
+    if not deck:
+
+        return RedirectResponse(
+            url="/decks",
+            status_code=303,
+        )
+
+
+    mainboard = sorted(
+        (
+            deck_card
+            for deck_card in deck.cards
+            if deck_card.section == "mainboard"
+        ),
+        key=lambda deck_card: deck_card.card.name,
+    )
+
+    sideboard = sorted(
+        (
+            deck_card
+            for deck_card in deck.cards
+            if deck_card.section == "sideboard"
+        ),
+        key=lambda deck_card: deck_card.card.name,
+    )
+
+
+    deck_card_ids = [
+        deck_card.card_id
+        for deck_card in deck.cards
+    ]
+
+    owned_by_card_id = (
+        dict(
+            db.query(
+                Inventory.card_id,
+                func.coalesce(
+                    func.sum(Inventory.quantity),
+                    0,
+                ),
+            )
+            .filter(
+                Inventory.card_id.in_(deck_card_ids)
+            )
+            .group_by(Inventory.card_id)
+            .all()
+        )
+        if deck_card_ids
+        else {}
+    )
+
+
+    inventory_rows = (
+        build_collection_query(
+            db,
+            search=search,
+            set_code=set_code,
+            card_type=card_type,
+            color=color,
+            rarity=rarity,
+            finish=finish,
+            treatment=treatment,
+        )
+        .all()
+    )
+
+    browse_cards_by_id = {}
+
+    for row in inventory_rows:
+
+        entry = browse_cards_by_id.setdefault(
+            row.card.id,
+            {
+                "card": row.card,
+                "owned_qty": 0,
+            },
+        )
+
+        entry["owned_qty"] += row.quantity
+
+    browse_cards = sorted(
+        browse_cards_by_id.values(),
+        key=lambda entry: entry["card"].name,
+    )
+
+
+    filter_options = get_collection_filter_options(db)
+
+
+    return render_template(
+        request,
+        "deck_detail.html",
+        {
+            "deck": deck,
+            "mainboard": mainboard,
+            "sideboard": sideboard,
+            "mainboard_count": sum(
+                deck_card.quantity for deck_card in mainboard
+            ),
+            "sideboard_count": sum(
+                deck_card.quantity for deck_card in sideboard
+            ),
+            "owned_by_card_id": owned_by_card_id,
+            "browse_cards": browse_cards,
+            "set_codes": filter_options["set_codes"],
+            "rarities": filter_options["rarities"],
+            "colors": COLOR_OPTIONS,
+            "finishes": filter_options["finishes"],
+            "treatments": filter_options["treatments"],
+            "filters": {
+                "search": search,
+                "set_code": set_code,
+                "card_type": card_type,
+                "color": color,
+                "rarity": rarity,
+                "finish": finish,
+                "treatment": treatment,
+            },
+        },
+    )
+
+
+@app.post("/decks/{deck_id}")
+def update_deck(
+    deck_id: int,
+    name: str = Form(...),
+    notes: str = Form(""),
+    db: Session = Depends(get_db),
+):
+
+    deck = (
+        db.query(Deck)
+        .filter(Deck.id == deck_id)
+        .first()
+    )
+
+    if deck:
+
+        deck.name = name.strip() or deck.name
+
+        deck.notes = notes.strip() or None
+
+        db.commit()
+
+
+    return RedirectResponse(
+        url=f"/decks/{deck_id}",
+        status_code=303,
+    )
+
+
+@app.post("/decks/{deck_id}/delete")
+def delete_deck(
+    deck_id: int,
+    db: Session = Depends(get_db),
+):
+
+    deck = (
+        db.query(Deck)
+        .filter(Deck.id == deck_id)
+        .first()
+    )
+
+    if deck:
+
+        db.delete(deck)
+
+        db.commit()
+
+
+    return RedirectResponse(
+        url="/decks",
+        status_code=303,
+    )
+
+
+@app.post("/decks/{deck_id}/cards")
+def add_card_to_deck(
+    deck_id: int,
+    card_id: int = Form(...),
+    section: str = Form("mainboard"),
+    quantity: int = Form(1),
+    db: Session = Depends(get_db),
+):
+
+    if section not in DECK_SECTIONS:
+
+        section = "mainboard"
+
+
+    owned_qty = owned_quantity_for_card(db, card_id)
+
+    deck_card = (
+        db.query(DeckCard)
+        .filter(
+            DeckCard.deck_id == deck_id,
+            DeckCard.card_id == card_id,
+            DeckCard.section == section,
+        )
+        .first()
+    )
+
+    current_qty = deck_card.quantity if deck_card else 0
+
+    new_qty = min(current_qty + quantity, owned_qty)
+
+    if new_qty <= 0:
+
+        if deck_card:
+
+            db.delete(deck_card)
+
+            db.commit()
+
+        return RedirectResponse(
+            url=f"/decks/{deck_id}",
+            status_code=303,
+        )
+
+    if deck_card:
+
+        deck_card.quantity = new_qty
+
+    else:
+
+        db.add(
+            DeckCard(
+                deck_id=deck_id,
+                card_id=card_id,
+                section=section,
+                quantity=new_qty,
+            )
+        )
+
+    db.commit()
+
+
+    return RedirectResponse(
+        url=f"/decks/{deck_id}",
+        status_code=303,
+    )
+
+
+@app.post("/decks/{deck_id}/cards/{deck_card_id}/quantity")
+def update_deck_card_quantity(
+    deck_id: int,
+    deck_card_id: int,
+    quantity: int = Form(...),
+    db: Session = Depends(get_db),
+):
+
+    deck_card = (
+        db.query(DeckCard)
+        .filter(
+            DeckCard.id == deck_card_id,
+            DeckCard.deck_id == deck_id,
+        )
+        .first()
+    )
+
+    if deck_card:
+
+        owned_qty = owned_quantity_for_card(
+            db, deck_card.card_id
+        )
+
+        capped_qty = min(quantity, owned_qty)
+
+        if capped_qty <= 0:
+
+            db.delete(deck_card)
+
+        else:
+
+            deck_card.quantity = capped_qty
+
+        db.commit()
+
+
+    return RedirectResponse(
+        url=f"/decks/{deck_id}",
+        status_code=303,
+    )
+
+
+@app.post("/decks/{deck_id}/cards/{deck_card_id}/delete")
+def delete_deck_card(
+    deck_id: int,
+    deck_card_id: int,
+    db: Session = Depends(get_db),
+):
+
+    deck_card = (
+        db.query(DeckCard)
+        .filter(
+            DeckCard.id == deck_card_id,
+            DeckCard.deck_id == deck_id,
+        )
+        .first()
+    )
+
+    if deck_card:
+
+        db.delete(deck_card)
+
+        db.commit()
+
+
+    return RedirectResponse(
+        url=f"/decks/{deck_id}",
+        status_code=303,
+    )
+
+
+@app.get("/decks/{deck_id}/export.txt")
+def export_deck_txt(
+    deck_id: int,
+    db: Session = Depends(get_db),
+):
+
+    deck = (
+        db.query(Deck)
+        .filter(Deck.id == deck_id)
+        .first()
+    )
+
+    if not deck:
+
+        return RedirectResponse(
+            url="/decks",
+            status_code=303,
+        )
+
+
+    mainboard = sorted(
+        (
+            deck_card
+            for deck_card in deck.cards
+            if deck_card.section == "mainboard"
+        ),
+        key=lambda deck_card: deck_card.card.name,
+    )
+
+    sideboard = sorted(
+        (
+            deck_card
+            for deck_card in deck.cards
+            if deck_card.section == "sideboard"
+        ),
+        key=lambda deck_card: deck_card.card.name,
+    )
+
+
+    lines = ["Deck"]
+
+    for deck_card in mainboard:
+
+        lines.append(
+            f"{deck_card.quantity} {deck_card.card.name} "
+            f"({deck_card.card.set_code}) "
+            f"{deck_card.card.collector_number}"
+        )
+
+    if sideboard:
+
+        lines.append("")
+
+        lines.append("Sideboard")
+
+        for deck_card in sideboard:
+
+            lines.append(
+                f"{deck_card.quantity} {deck_card.card.name} "
+                f"({deck_card.card.set_code}) "
+                f"{deck_card.card.collector_number}"
+            )
+
+    content = "\n".join(lines) + "\n"
+
+
+    return Response(
+        content=content,
+        media_type="text/plain",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="{slugify_deck_name(deck.name)}_decklist.txt"',
         },
     )
 

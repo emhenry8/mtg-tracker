@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Decks</h1>
+
+
+<div class="card" style="margin-bottom: 25px;">
+
+    <h2>New Deck</h2>
+
+    <form
+        method="post"
+        action="/decks"
+    >
+
+        <div class="form-grid">
+
+            <div>
+                <label>
+                    Deck Name
+                </label>
+
+                <input
+                    type="text"
+                    name="name"
+                    placeholder="Mono Red Aggro"
+                    required
+                >
+            </div>
+
+            <div>
+                <label>
+                    Notes
+                </label>
+
+                <input
+                    type="text"
+                    name="notes"
+                    placeholder="Optional"
+                >
+            </div>
+
+            <div>
+                <button
+                    type="submit"
+                    class="positive"
+                >
+                    Create Deck
+                </button>
+            </div>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+<div class="actions" style="margin-bottom: 25px;">
+
+    <a href="/decks/import">
+        <button class="secondary" type="button">
+            Import from ManaBox / Arena txt
+        </button>
+    </a>
+
+</div>
+
+
+{% if not deck_rows %}
+
+<div class="card">
+    No decks yet — create one above, or import a decklist.
+</div>
+
+{% else %}
+
+<div class="card">
+
+    <table>
+
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Mainboard</th>
+                <th>Sideboard</th>
+                <th>Notes</th>
+                <th>Updated</th>
+                <th></th>
+            </tr>
+        </thead>
+
+        <tbody>
+
+        {% for row in deck_rows %}
+
+            <tr>
+                <td>
+                    <a href="/decks/{{ row.deck.id }}">
+                        <strong>{{ row.deck.name }}</strong>
+                    </a>
+                </td>
+
+                <td>{{ row.mainboard_count }}</td>
+
+                <td>{{ row.sideboard_count }}</td>
+
+                <td class="muted">{{ row.deck.notes or "" }}</td>
+
+                <td class="muted" style="font-size: 12px;">
+                    {{ row.deck.updated_at.strftime("%Y-%m-%d %H:%M") }}
+                </td>
+
+                <td>
+                    <a href="/decks/{{ row.deck.id }}">
+                        <button type="button">Open</button>
+                    </a>
+                </td>
+            </tr>
+
+        {% endfor %}
+
+        </tbody>
+
+    </table>
+
+</div>
+
+{% endif %}
+
+{% endblock %}

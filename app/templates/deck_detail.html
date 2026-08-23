@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<p>
+    <a href="/decks">&larr; All Decks</a>
+</p>
+
+<h1>{{ deck.name }}</h1>
+
+{% if deck.notes %}
+<p class="muted">{{ deck.notes }}</p>
+{% endif %}
+
+
+<div class="stats">
+
+    <div class="stat">
+        <div class="muted">Mainboard</div>
+        <div class="stat-number">{{ mainboard_count }}</div>
+    </div>
+
+    <div class="stat">
+        <div class="muted">Sideboard</div>
+        <div class="stat-number">{{ sideboard_count }}</div>
+    </div>
+
+</div>
+
+
+<div class="actions" style="margin-bottom: 25px;">
+
+    <a href="/decks/{{ deck.id }}/export.txt">
+        <button type="button" class="secondary">
+            Export Decklist (.txt)
+        </button>
+    </a>
+
+</div>
+
+
+<div class="card" style="margin-bottom: 25px;">
+
+    <h2>Deck Settings</h2>
+
+    <form
+        method="post"
+        action="/decks/{{ deck.id }}"
+    >
+
+        <div class="form-grid">
+
+            <div>
+                <label>Name</label>
+                <input type="text" name="name" value="{{ deck.name }}" required>
+            </div>
+
+            <div>
+                <label>Notes</label>
+                <input type="text" name="notes" value="{{ deck.notes or '' }}">
+            </div>
+
+            <div>
+                <button type="submit">Save</button>
+            </div>
+
+        </div>
+
+    </form>
+
+    <form
+        method="post"
+        action="/decks/{{ deck.id }}/delete"
+        onsubmit="return confirm('Delete this deck?');"
+        style="margin-top: 15px;"
+    >
+        <button type="submit" class="danger">Delete Deck</button>
+    </form>
+
+</div>
+
+
+{% macro deck_card_table(rows, section) %}
+
+<div style="overflow-x: auto;">
+
+<table>
+
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Set</th>
+            <th>Owned</th>
+            <th>Qty</th>
+            <th></th>
+        </tr>
+    </thead>
+
+    <tbody>
+
+    {% for deck_card in rows %}
+
+    <tr>
+        <td>{{ deck_card.card.name }}</td>
+
+        <td class="muted">
+            {{ deck_card.card.set_code }} #{{ deck_card.card.collector_number }}
+        </td>
+
+        <td class="muted">
+            {{ owned_by_card_id.get(deck_card.card_id, 0) }}
+        </td>
+
+        <td>
+            <form
+                method="post"
+                action="/decks/{{ deck.id }}/cards/{{ deck_card.id }}/quantity"
+                style="display: flex; gap: 6px; align-items: center;"
+            >
+                <input
+                    class="small-input"
+                    type="number"
+                    name="quantity"
+                    min="0"
+                    value="{{ deck_card.quantity }}"
+                >
+                <button type="submit">Save</button>
+            </form>
+        </td>
+
+        <td>
+            <form
+                method="post"
+                action="/decks/{{ deck.id }}/cards/{{ deck_card.id }}/delete"
+            >
+                <button type="submit" class="danger">Remove</button>
+            </form>
+        </td>
+    </tr>
+
+    {% else %}
+
+    <tr>
+        <td colspan="5" class="muted">
+            No cards in the {{ section }} yet.
+        </td>
+    </tr>
+
+    {% endfor %}
+
+    </tbody>
+
+</table>
+
+</div>
+
+{% endmacro %}
+
+
+<div class="card" style="margin-bottom: 25px;">
+    <h2>Mainboard</h2>
+    {{ deck_card_table(mainboard, "mainboard") }}
+</div>
+
+<div class="card" style="margin-bottom: 25px;">
+    <h2>Sideboard</h2>
+    {{ deck_card_table(sideboard, "sideboard") }}
+</div>
+
+
+<div class="filters">
+
+    <h2>Add From Your Collection</h2>
+
+    <form
+        method="get"
+        action="/decks/{{ deck.id }}"
+    >
+
+        <div class="form-grid">
+
+            <div>
+                <label>Search</label>
+                <input type="text" name="search" value="{{ filters.search }}" placeholder="Card name">
+            </div>
+
+            <div>
+                <label>Set</label>
+                <select name="set_code">
+                    <option value="">All Sets</option>
+                    {% for code in set_codes %}
+                    <option value="{{ code }}" {% if filters.set_code == code %}selected{% endif %}>{{ code }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label>Card Type</label>
+                <input type="text" name="card_type" value="{{ filters.card_type }}" placeholder="Creature, Instant...">
+            </div>
+
+            <div>
+                <label>Color</label>
+                <select name="color">
+                    <option value="">All Colors</option>
+                    {% for code, label in colors %}
+                    <option value="{{ code }}" {% if filters.color == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label>Rarity</label>
+                <select name="rarity">
+                    <option value="">All Rarities</option>
+                    {% for item in rarities %}
+                    <option value="{{ item }}" {% if filters.rarity == item %}selected{% endif %}>{{ item|capitalize }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label>Finish</label>
+                <select name="finish">
+                    <option value="">All Finishes</option>
+                    {% for item in finishes %}
+                    <option value="{{ item }}" {% if filters.finish == item %}selected{% endif %}>{{ item|capitalize }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label>Treatment</label>
+                <select name="treatment">
+                    <option value="">All Treatments</option>
+                    {% for item in treatments %}
+                    <option value="{{ item }}" {% if filters.treatment == item %}selected{% endif %}>{{ item|capitalize }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <button type="submit">Apply Filters</button>
+            </div>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+{% if not browse_cards %}
+
+<div class="card">
+    No cards in your collection match these filters.
+</div>
+
+{% else %}
+
+<div style="overflow-x: auto;">
+
+<table>
+
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Set</th>
+            <th>Rarity</th>
+            <th>Owned</th>
+            <th>Add</th>
+        </tr>
+    </thead>
+
+    <tbody>
+
+    {% for entry in browse_cards %}
+
+    <tr>
+        <td>{{ entry.card.name }}</td>
+
+        <td class="muted">
+            {{ entry.card.set_code }} #{{ entry.card.collector_number }}
+        </td>
+
+        <td>{{ entry.card.rarity|capitalize }}</td>
+
+        <td>{{ entry.owned_qty }}</td>
+
+        <td>
+            <form
+                method="post"
+                action="/decks/{{ deck.id }}/cards"
+                style="display: flex; gap: 6px; align-items: center;"
+            >
+                <input type="hidden" name="card_id" value="{{ entry.card.id }}">
+
+                <select name="section">
+                    <option value="mainboard">Mainboard</option>
+                    <option value="sideboard">Sideboard</option>
+                </select>
+
+                <input
+                    class="small-input"
+                    type="number"
+                    name="quantity"
+                    min="1"
+                    max="{{ entry.owned_qty }}"
+                    value="1"
+                >
+
+                <button type="submit" class="positive">Add</button>
+            </form>
+        </td>
+    </tr>
+
+    {% endfor %}
+
+    </tbody>
+
+</table>
+
+</div>
+
+{% endif %}
+
+{% endblock %}

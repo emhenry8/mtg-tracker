@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Import Deck</h1>
+
+<p class="muted">
+    Paste a decklist in the Arena/ManaBox text format
+    (e.g. <code>4 Lightning Bolt (M11) 146</code> per line,
+    with an optional <code>Sideboard</code> section header).
+    This is the same format ManaBox exports when it suggests
+    a deck built from your collection.
+</p>
+
+
+{% if results %}
+
+<div class="card" style="margin-bottom: 25px;">
+
+    <h2>Import Results</h2>
+
+    {% for result in results %}
+
+    <div class="bulk-result">
+
+        {% if result.success %}
+
+        <span class="positive-text">
+            {{ result.message }}
+        </span>
+
+        {% else %}
+
+        <span class="danger-text">
+            {{ result.line }} — {{ result.message }}
+        </span>
+
+        {% endif %}
+
+    </div>
+
+    {% endfor %}
+
+    {% if deck_id %}
+
+    <p style="margin-top: 15px;">
+        <a href="/decks/{{ deck_id }}">
+            <button type="button" class="positive">
+                Open Deck
+            </button>
+        </a>
+    </p>
+
+    {% endif %}
+
+</div>
+
+{% endif %}
+
+
+<div class="card">
+
+    <form
+        method="post"
+        action="/decks/import"
+    >
+
+        <div class="form-grid" style="margin-bottom: 15px;">
+
+            <div>
+                <label>
+                    Deck Name
+                </label>
+
+                <input
+                    type="text"
+                    name="name"
+                    placeholder="Suggested Deck"
+                    required
+                >
+            </div>
+
+        </div>
+
+
+        <label>
+            Decklist
+        </label>
+
+        <textarea
+            name="decklist"
+            rows="16"
+            style="width: 100%; font-family: monospace; padding: 10px; border-radius: 6px; border: 1px solid #bbb;"
+            placeholder="Deck&#10;4 Lightning Bolt (M11) 146&#10;4 Mountain (M11) 234&#10;&#10;Sideboard&#10;2 Negate (M11) 55"
+            required
+        ></textarea>
+
+        <div class="actions">
+
+            <button
+                type="submit"
+                class="positive"
+            >
+                Import Deck
+            </button>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

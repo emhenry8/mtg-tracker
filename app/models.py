@@ -237,3 +237,118 @@ class Inventory(Base):
         ),
 
     )
+
+
+class Deck(Base):
+
+    __tablename__ = "decks"
+
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+
+    name = Column(
+        String(255),
+        nullable=False,
+    )
+
+
+    notes = Column(
+        Text,
+        nullable=True,
+    )
+
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+    cards = relationship(
+        "DeckCard",
+        back_populates="deck",
+        cascade="all, delete-orphan",
+    )
+
+
+class DeckCard(Base):
+
+    __tablename__ = "deck_cards"
+
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+
+    deck_id = Column(
+        Integer,
+        ForeignKey(
+            "decks.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+
+    card_id = Column(
+        Integer,
+        ForeignKey(
+            "cards.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+
+    section = Column(
+        String(20),
+        nullable=False,
+        default="mainboard",
+    )
+
+
+    quantity = Column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+
+
+    deck = relationship(
+        "Deck",
+        back_populates="cards",
+    )
+
+
+    card = relationship(
+        "Card",
+    )
+
+
+    __table_args__ = (
+
+        UniqueConstraint(
+            "deck_id",
+            "card_id",
+            "section",
+            name="uq_deck_card_section",
+        ),
+
+    )
