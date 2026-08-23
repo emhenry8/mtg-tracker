@@ -1,0 +1,949 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>My Collection</h1>
+
+<div class="stats">
+
+    <div class="stat">
+
+        <div class="muted">
+            Cards Shown
+        </div>
+
+        <div class="stat-number">
+            {{ total_cards }}
+        </div>
+
+    </div>
+
+    <div class="stat">
+
+        <div class="muted">
+            Current Value
+        </div>
+
+        <div class="stat-number">
+            ${{ "%.2f"|format(total_value) }}
+        </div>
+
+    </div>
+
+</div>
+
+
+<div class="filters">
+
+    <form
+        method="get"
+        action="/collection"
+    >
+
+        <div class="form-grid">
+
+            <div>
+
+                <label>
+                    Search
+                </label>
+
+                <input
+                    type="text"
+                    name="search"
+                    value="{{ filters.search }}"
+                    placeholder="Card name"
+                >
+
+            </div>
+
+
+            <div>
+
+                <label>
+                    Set
+                </label>
+
+                <select name="set_code">
+
+                    <option value="">
+                        All Sets
+                    </option>
+
+                    {% for code in set_codes %}
+
+                    <option
+                        value="{{ code }}"
+                        {% if filters.set_code == code %}
+                            selected
+                        {% endif %}
+                    >
+                        {{ code }}
+                    </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div>
+
+                <label>
+                    Card Type
+                </label>
+
+                <input
+                    type="text"
+                    name="card_type"
+                    value="{{ filters.card_type }}"
+                    placeholder="Creature, Instant..."
+                >
+
+            </div>
+
+
+            <div>
+
+                <label>
+                    Color
+                </label>
+
+                <select name="color">
+
+                    <option value="">
+                        All Colors
+                    </option>
+
+                    {% for code, label in colors %}
+
+                    <option
+                        value="{{ code }}"
+                        {% if filters.color == code %}
+                            selected
+                        {% endif %}
+                    >
+                        {{ label }}
+                    </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div>
+
+                <label>
+                    Rarity
+                </label>
+
+                <select name="rarity">
+
+                    <option value="">
+                        All Rarities
+                    </option>
+
+                    {% for item in rarities %}
+
+                    <option
+                        value="{{ item }}"
+                        {% if filters.rarity == item %}
+                            selected
+                        {% endif %}
+                    >
+                        {{ item|capitalize }}
+                    </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div>
+
+                <label>
+                    Finish
+                </label>
+
+                <select name="finish">
+
+                    <option value="">
+                        All Finishes
+                    </option>
+
+                    {% for item in finishes %}
+
+                    <option
+                        value="{{ item }}"
+                        {% if filters.finish == item %}
+                            selected
+                        {% endif %}
+                    >
+                        {{ item|capitalize }}
+                    </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div>
+
+                <label>
+                    Treatment
+                </label>
+
+                <select name="treatment">
+
+                    <option value="">
+                        All Treatments
+                    </option>
+
+                    {% for item in treatments %}
+
+                    <option
+                        value="{{ item }}"
+                        {% if filters.treatment == item %}
+                            selected
+                        {% endif %}
+                    >
+                        {{ item|capitalize }}
+                    </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div>
+
+                <label>
+                    Sort By
+                </label>
+
+                <select name="sort">
+
+                    <option
+                        value="name"
+                        {% if filters.sort == "name" %}
+                            selected
+                        {% endif %}
+                    >
+                        Name
+                    </option>
+
+                    <option
+                        value="price"
+                        {% if filters.sort == "price" %}
+                            selected
+                        {% endif %}
+                    >
+                        Price
+                    </option>
+
+                    <option
+                        value="set"
+                        {% if filters.sort == "set" %}
+                            selected
+                        {% endif %}
+                    >
+                        Set + Number
+                    </option>
+
+                    <option
+                        value="rarity"
+                        {% if filters.sort == "rarity" %}
+                            selected
+                        {% endif %}
+                    >
+                        Rarity
+                    </option>
+
+                    <option
+                        value="date_added"
+                        {% if filters.sort == "date_added" %}
+                            selected
+                        {% endif %}
+                    >
+                        Date Added
+                    </option>
+
+                    <option
+                        value="updated"
+                        {% if filters.sort == "updated" %}
+                            selected
+                        {% endif %}
+                    >
+                        Last Updated
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div>
+
+                <label>
+                    Direction
+                </label>
+
+                <select name="direction">
+
+                    <option
+                        value="asc"
+                        {% if filters.direction == "asc" %}
+                            selected
+                        {% endif %}
+                    >
+                        Ascending
+                    </option>
+
+                    <option
+                        value="desc"
+                        {% if filters.direction == "desc" %}
+                            selected
+                        {% endif %}
+                    >
+                        Descending
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div>
+
+                <button type="submit">
+                    Apply Filters
+                </button>
+
+            </div>
+
+        </div>
+
+        <input
+            type="hidden"
+            name="view"
+            value="{{ filters.view }}"
+        >
+
+    </form>
+
+
+    <div class="view-switcher">
+
+        <a
+            href="{{ request.url.include_query_params(view='card') }}"
+            class="{% if filters.view == 'card' %}active{% endif %}"
+        >
+            Card View
+        </a>
+
+        <a
+            href="{{ request.url.include_query_params(view='list') }}"
+            class="{% if filters.view == 'list' %}active{% endif %}"
+        >
+            List View
+        </a>
+
+        <a
+            href="{{ request.url.include_query_params(view='gallery') }}"
+            class="{% if filters.view == 'gallery' %}active{% endif %}"
+        >
+            Gallery View
+        </a>
+
+    </div>
+
+
+    <div class="actions">
+
+        <form
+            method="get"
+            action="/collection"
+        >
+            <input
+                type="hidden"
+                name="view"
+                value="{{ filters.view }}"
+            >
+
+            <button
+                type="submit"
+                class="secondary"
+            >
+                Clear Filters
+            </button>
+        </form>
+
+
+        <form
+            method="post"
+            action="/refresh-prices"
+            onsubmit="
+                return confirm(
+                    'Refresh prices for all cards?'
+                );
+            "
+        >
+            <button
+                type="submit"
+                class="positive"
+            >
+                Refresh All Prices
+            </button>
+        </form>
+
+
+        <form
+            method="get"
+            action="/collection/export.csv"
+        >
+            <input type="hidden" name="search" value="{{ filters.search }}">
+            <input type="hidden" name="set_code" value="{{ filters.set_code }}">
+            <input type="hidden" name="card_type" value="{{ filters.card_type }}">
+            <input type="hidden" name="color" value="{{ filters.color }}">
+            <input type="hidden" name="rarity" value="{{ filters.rarity }}">
+            <input type="hidden" name="finish" value="{{ filters.finish }}">
+            <input type="hidden" name="treatment" value="{{ filters.treatment }}">
+            <input type="hidden" name="sort" value="{{ filters.sort }}">
+            <input type="hidden" name="direction" value="{{ filters.direction }}">
+
+            <button
+                type="submit"
+                class="secondary"
+            >
+                Export to Moxfield CSV
+            </button>
+        </form>
+
+
+        <form
+            method="get"
+            action="/collection/export/manabox.csv"
+        >
+            <input type="hidden" name="search" value="{{ filters.search }}">
+            <input type="hidden" name="set_code" value="{{ filters.set_code }}">
+            <input type="hidden" name="card_type" value="{{ filters.card_type }}">
+            <input type="hidden" name="color" value="{{ filters.color }}">
+            <input type="hidden" name="rarity" value="{{ filters.rarity }}">
+            <input type="hidden" name="finish" value="{{ filters.finish }}">
+            <input type="hidden" name="treatment" value="{{ filters.treatment }}">
+            <input type="hidden" name="sort" value="{{ filters.sort }}">
+            <input type="hidden" name="direction" value="{{ filters.direction }}">
+
+            <button
+                type="submit"
+                class="secondary"
+            >
+                Export to ManaBox CSV
+            </button>
+        </form>
+
+    </div>
+
+</div>
+
+
+{% if not inventory_rows %}
+
+<div class="card">
+
+    No cards match your current filters.
+
+</div>
+
+
+{% elif filters.view == "list" %}
+
+<div style="overflow-x: auto;">
+
+<table>
+
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Set</th>
+            <th>Rarity</th>
+            <th>Type</th>
+            <th>Finish</th>
+            <th>Treatment</th>
+            <th>Qty</th>
+            <th>Unit Price</th>
+            <th>Entry Value</th>
+            <th>Added</th>
+            <th>Updated</th>
+            <th></th>
+        </tr>
+    </thead>
+
+    <tbody>
+
+    {% for row in inventory_rows %}
+
+    {% set unit_price = inventory_price(row) %}
+
+    <tr>
+        <td>{{ row.card.name }}</td>
+
+        <td class="muted">
+            {{ row.card.set_code }}
+            #{{ row.card.collector_number }}
+        </td>
+
+        <td>{{ row.card.rarity|capitalize }}</td>
+
+        <td class="muted">{{ row.card.type_line }}</td>
+
+        <td>{{ row.finish|capitalize }}</td>
+
+        <td>{{ row.treatment|capitalize }}</td>
+
+        <td>
+
+            <div class="quantity-controls">
+
+                <form
+                    method="post"
+                    action="/inventory/{{ row.id }}/adjust"
+                >
+                    <input type="hidden" name="amount" value="-1">
+                    <button type="submit">−</button>
+                </form>
+
+                <strong>{{ row.quantity }}</strong>
+
+                <form
+                    method="post"
+                    action="/inventory/{{ row.id }}/adjust"
+                >
+                    <input type="hidden" name="amount" value="1">
+                    <button type="submit" class="positive">+</button>
+                </form>
+
+            </div>
+
+        </td>
+
+        <td>${{ "%.2f"|format(unit_price) }}</td>
+
+        <td><strong>${{ "%.2f"|format(unit_price * row.quantity) }}</strong></td>
+
+        <td class="muted" style="font-size: 12px;">
+            {{ row.created_at.strftime("%Y-%m-%d %H:%M") }}
+        </td>
+
+        <td class="muted" style="font-size: 12px;">
+            {{ row.updated_at.strftime("%Y-%m-%d %H:%M") }}
+        </td>
+
+        <td>
+
+            <form
+                method="post"
+                action="/inventory/{{ row.id }}/delete"
+                onsubmit="return confirm('Delete this collection entry?');"
+            >
+                <button type="submit" class="danger">Delete</button>
+            </form>
+
+        </td>
+
+    </tr>
+
+    {% endfor %}
+
+    </tbody>
+
+</table>
+
+</div>
+
+
+{% elif filters.view == "gallery" %}
+
+<div class="gallery-grid">
+
+{% for row in inventory_rows %}
+
+{% set unit_price = inventory_price(row) %}
+
+<div class="gallery-card">
+
+    {% if row.card.image_url %}
+
+    <img
+        src="{{ row.card.image_url }}"
+        alt="{{ row.card.name }}"
+        loading="lazy"
+    >
+
+    {% else %}
+
+    <div class="gallery-placeholder">
+        {{ row.card.name }}
+    </div>
+
+    {% endif %}
+
+    <div class="gallery-body">
+
+        <div class="muted" style="font-size: 12px;">
+            {{ row.card.set_code }} #{{ row.card.collector_number }}
+            &middot; {{ row.finish|capitalize }}
+        </div>
+
+        <div class="muted" style="font-size: 11px; margin-top: 2px;">
+            Added {{ row.created_at.strftime("%Y-%m-%d") }}
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+
+            <span class="price" style="font-size: 16px;">
+                ${{ "%.2f"|format(unit_price) }}
+            </span>
+
+            <div class="quantity-controls" style="margin-top: 0;">
+
+                <form
+                    method="post"
+                    action="/inventory/{{ row.id }}/adjust"
+                >
+                    <input type="hidden" name="amount" value="-1">
+                    <button type="submit">−</button>
+                </form>
+
+                <strong>{{ row.quantity }}</strong>
+
+                <form
+                    method="post"
+                    action="/inventory/{{ row.id }}/adjust"
+                >
+                    <input type="hidden" name="amount" value="1">
+                    <button type="submit" class="positive">+</button>
+                </form>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endfor %}
+
+</div>
+
+
+{% else %}
+
+<div class="card-grid">
+
+{% for row in inventory_rows %}
+
+<div class="card">
+
+    <h2>
+        {{ row.card.name }}
+    </h2>
+
+
+    <div class="muted">
+
+        {{ row.card.set_name }}
+
+        (
+        {{ row.card.set_code }}
+        #{{ row.card.collector_number }}
+        )
+
+    </div>
+
+
+    <div style="margin-top: 10px;">
+
+        <span class="badge">
+            {{ row.card.type_line }}
+        </span>
+
+        <span class="badge">
+            {{ row.card.rarity|capitalize }}
+        </span>
+
+        <span class="badge">
+            {{ row.finish|capitalize }}
+        </span>
+
+        <span class="badge">
+            {{ row.treatment|capitalize }}
+        </span>
+
+    </div>
+
+
+    {% set unit_price = inventory_price(row) %}
+
+
+    <div style="margin-top: 15px;">
+
+        <div class="muted">
+            Unit Price
+        </div>
+
+        <div class="price">
+            ${{ "%.2f"|format(unit_price) }}
+        </div>
+
+    </div>
+
+
+    <div style="margin-top: 10px;">
+
+        <div class="muted">
+            Entry Value
+        </div>
+
+        <strong>
+            ${{ "%.2f"|format(unit_price * row.quantity) }}
+        </strong>
+
+    </div>
+
+
+    <div class="quantity-controls">
+
+        <form
+            method="post"
+            action="/inventory/{{ row.id }}/adjust"
+        >
+
+            <input
+                type="hidden"
+                name="amount"
+                value="-1"
+            >
+
+            <button type="submit">
+                −
+            </button>
+
+        </form>
+
+
+        <strong>
+            {{ row.quantity }}
+        </strong>
+
+
+        <form
+            method="post"
+            action="/inventory/{{ row.id }}/adjust"
+        >
+
+            <input
+                type="hidden"
+                name="amount"
+                value="1"
+            >
+
+            <button
+                type="submit"
+                class="positive"
+            >
+                +
+            </button>
+
+        </form>
+
+    </div>
+
+
+    <form
+        method="post"
+        action="/inventory/{{ row.id }}/quantity"
+        style="margin-top: 12px;"
+    >
+
+        <label>
+            Set Exact Quantity
+        </label>
+
+        <input
+            class="small-input"
+            type="number"
+            name="quantity"
+            min="0"
+            value="{{ row.quantity }}"
+        >
+
+        <button type="submit">
+            Save
+        </button>
+
+    </form>
+
+
+    <hr style="margin: 20px 0;">
+
+
+    <form
+        method="post"
+        action="/inventory/{{ row.id }}/details"
+    >
+
+        <div class="form-grid">
+
+            <div>
+
+                <label>
+                    Finish
+                </label>
+
+                <select name="finish">
+
+                    <option
+                        value="normal"
+                        {% if row.finish == "normal" %}
+                            selected
+                        {% endif %}
+                    >
+                        Normal
+                    </option>
+
+                    <option
+                        value="foil"
+                        {% if row.finish == "foil" %}
+                            selected
+                        {% endif %}
+                    >
+                        Foil
+                    </option>
+
+                    <option
+                        value="etched"
+                        {% if row.finish == "etched" %}
+                            selected
+                        {% endif %}
+                    >
+                        Etched
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div>
+
+                <label>
+                    Treatment
+                </label>
+
+                <input
+                    type="text"
+                    name="treatment"
+                    value="{{ row.treatment }}"
+                >
+
+            </div>
+
+
+            <div>
+
+                <button type="submit">
+                    Save Details
+                </button>
+
+            </div>
+
+        </div>
+
+    </form>
+
+
+    <div class="actions">
+
+        <form
+            method="post"
+            action="/inventory/{{ row.id }}/refresh-price"
+        >
+
+            <button
+                type="submit"
+                class="secondary"
+            >
+                Refresh Price
+            </button>
+
+        </form>
+
+
+        <form
+            method="post"
+            action="/inventory/{{ row.id }}/delete"
+            onsubmit="
+                return confirm(
+                    'Delete this collection entry?'
+                );
+            "
+        >
+
+            <button
+                type="submit"
+                class="danger"
+            >
+                Delete Entry
+            </button>
+
+        </form>
+
+    </div>
+
+
+    <p
+        class="muted"
+        style="font-size: 11px;"
+    >
+
+        Added: {{ row.created_at.strftime("%Y-%m-%d %H:%M") }}
+        &middot;
+        Updated: {{ row.updated_at.strftime("%Y-%m-%d %H:%M") }}
+
+    </p>
+
+
+    {% if row.card.price_updated_at %}
+
+    <p
+        class="muted"
+        style="font-size: 11px;"
+    >
+
+        Price updated:
+        {{ row.card.price_updated_at }}
+
+    </p>
+
+    {% endif %}
+
+</div>
+
+{% endfor %}
+
+</div>
+
+{% endif %}
+
+{% endblock %}

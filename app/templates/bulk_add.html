@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Bulk Add</h1>
+
+<p class="muted">
+    Pick a set, add a row per collector number
+    with a quantity, then add them all at once.
+</p>
+
+
+{% if results %}
+
+<div class="card" style="margin-bottom: 25px;">
+
+    <h2>Results</h2>
+
+    {% for result in results %}
+
+    <div class="bulk-result">
+
+        <span class="badge">
+            #{{ result.collector_number }}
+        </span>
+
+        {% if result.success %}
+
+        <span class="positive-text">
+            Added {{ result.quantity }}x
+            {{ result.message }}
+        </span>
+
+        {% else %}
+
+        <span class="danger-text">
+            {{ result.message }}
+        </span>
+
+        {% endif %}
+
+    </div>
+
+    {% endfor %}
+
+</div>
+
+{% endif %}
+
+
+<div class="card">
+
+    <h2>
+        Add to Collection
+    </h2>
+
+    <form
+        method="post"
+        action="/bulk-add"
+        id="bulk-add-form"
+    >
+
+        <div class="form-grid">
+
+            <div>
+                <label>
+                    Set Code
+                </label>
+
+                <input
+                    type="text"
+                    name="set_code"
+                    placeholder="FIN"
+                    value="{{ last_set_code or '' }}"
+                    required
+                >
+            </div>
+
+            <div>
+                <label>
+                    Finish
+                </label>
+
+                <select name="finish">
+
+                    <option
+                        value="normal"
+                        {% if last_finish == "normal" or not last_finish %}
+                            selected
+                        {% endif %}
+                    >
+                        Normal
+                    </option>
+
+                    <option
+                        value="foil"
+                        {% if last_finish == "foil" %}
+                            selected
+                        {% endif %}
+                    >
+                        Foil
+                    </option>
+
+                    <option
+                        value="etched"
+                        {% if last_finish == "etched" %}
+                            selected
+                        {% endif %}
+                    >
+                        Etched
+                    </option>
+
+                </select>
+            </div>
+
+            <div>
+                <label>
+                    Treatment
+                </label>
+
+                <input
+                    type="text"
+                    name="treatment"
+                    value="{{ last_treatment or 'regular' }}"
+                >
+            </div>
+
+        </div>
+
+
+        <hr style="margin: 20px 0;">
+
+
+        <label>
+            Cards
+        </label>
+
+        <div id="bulk-rows">
+
+            <div class="bulk-row">
+                <input
+                    type="text"
+                    name="collector_number"
+                    placeholder="Collector #"
+                    required
+                >
+                <input
+                    type="number"
+                    name="quantity"
+                    min="1"
+                    value="1"
+                    required
+                >
+                <button
+                    type="button"
+                    class="secondary"
+                    onclick="this.closest('.bulk-row').remove()"
+                >
+                    Remove
+                </button>
+            </div>
+
+            <div class="bulk-row">
+                <input
+                    type="text"
+                    name="collector_number"
+                    placeholder="Collector #"
+                >
+                <input
+                    type="number"
+                    name="quantity"
+                    min="1"
+                    value="1"
+                >
+                <button
+                    type="button"
+                    class="secondary"
+                    onclick="this.closest('.bulk-row').remove()"
+                >
+                    Remove
+                </button>
+            </div>
+
+            <div class="bulk-row">
+                <input
+                    type="text"
+                    name="collector_number"
+                    placeholder="Collector #"
+                >
+                <input
+                    type="number"
+                    name="quantity"
+                    min="1"
+                    value="1"
+                >
+                <button
+                    type="button"
+                    class="secondary"
+                    onclick="this.closest('.bulk-row').remove()"
+                >
+                    Remove
+                </button>
+            </div>
+
+        </div>
+
+        <div class="actions">
+
+            <button
+                type="button"
+                onclick="addBulkRow()"
+            >
+                + Add Row
+            </button>
+
+            <button
+                type="submit"
+                class="positive"
+            >
+                Add All Cards
+            </button>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+<script>
+    function addBulkRow() {
+        const rows = document.getElementById("bulk-rows");
+
+        const row = document.createElement("div");
+        row.className = "bulk-row";
+
+        row.innerHTML = `
+            <input type="text" name="collector_number" placeholder="Collector #">
+            <input type="number" name="quantity" min="1" value="1">
+            <button type="button" class="secondary" onclick="this.closest('.bulk-row').remove()">Remove</button>
+        `;
+
+        rows.appendChild(row);
+
+        row.querySelector("input").focus();
+    }
+
+    document
+        .getElementById("bulk-add-form")
+        .addEventListener("submit", function (event) {
+
+            const rows = document.querySelectorAll("#bulk-rows .bulk-row");
+
+            let filled = 0;
+
+            rows.forEach(function (row) {
+
+                const numberInput = row.querySelector(
+                    'input[name="collector_number"]'
+                );
+
+                if (numberInput.value.trim()) {
+                    filled += 1;
+                } else {
+                    row.remove();
+                }
+
+            });
+
+            if (filled === 0) {
+                event.preventDefault();
+                alert("Add at least one collector number.");
+            }
+
+        });
+</script>
+
+{% endblock %}

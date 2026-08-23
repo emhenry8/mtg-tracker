@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Add Card</h1>
+
+{% if error %}
+
+<div class="error">
+    {{ error }}
+</div>
+
+{% endif %}
+
+<div class="stats">
+
+    <div class="stat">
+        <div class="muted">
+            Total Cards
+        </div>
+
+        <div class="stat-number">
+            {{ total_cards }}
+        </div>
+    </div>
+
+    <div class="stat">
+        <div class="muted">
+            Unique Variants
+        </div>
+
+        <div class="stat-number">
+            {{ unique_inventory_entries }}
+        </div>
+    </div>
+
+</div>
+
+<div class="card">
+
+    <h2>
+        Add to Collection
+    </h2>
+
+    <p class="muted">
+        Enter the set code and collector
+        number printed on the card.
+    </p>
+
+    <form
+        method="post"
+        action="/add"
+    >
+
+        <div class="form-grid">
+
+            <div>
+                <label>
+                    Set Code
+                </label>
+
+                <input
+                    type="text"
+                    name="set_code"
+                    placeholder="FIN"
+                    required
+                >
+            </div>
+
+            <div>
+                <label>
+                    Collector Number
+                </label>
+
+                <input
+                    type="text"
+                    name="collector_number"
+                    placeholder="123"
+                    required
+                >
+            </div>
+
+            <div>
+                <label>
+                    Finish
+                </label>
+
+                <select name="finish">
+
+                    <option value="normal">
+                        Normal
+                    </option>
+
+                    <option value="foil">
+                        Foil
+                    </option>
+
+                    <option value="etched">
+                        Etched
+                    </option>
+
+                </select>
+            </div>
+
+            <div>
+                <label>
+                    Treatment
+                </label>
+
+                <input
+                    type="text"
+                    name="treatment"
+                    value="regular"
+                >
+            </div>
+
+            <div>
+                <label>
+                    Quantity
+                </label>
+
+                <input
+                    type="number"
+                    name="quantity"
+                    min="1"
+                    value="1"
+                    required
+                >
+            </div>
+
+            <div>
+                <button type="submit">
+                    Add Card
+                </button>
+            </div>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Set Summary</h1>
+
+
+<div class="stats">
+
+    <div class="stat">
+
+        <div class="muted">
+            Total Cards Owned
+        </div>
+
+        <div class="stat-number">
+            {{ grand_total_cards }}
+        </div>
+
+    </div>
+
+
+    <div class="stat">
+
+        <div class="muted">
+            Total Collection Value
+        </div>
+
+        <div class="stat-number">
+            ${{ "%.2f"|format(grand_total_value) }}
+        </div>
+
+    </div>
+
+
+    <div class="stat">
+
+        <div class="muted">
+            Sets Collected
+        </div>
+
+        <div class="stat-number">
+            {{ set_rows|length }}
+        </div>
+
+    </div>
+
+</div>
+
+
+<div class="card">
+
+    <table>
+
+        <thead>
+
+            <tr>
+
+                <th>
+                    Set Code
+                </th>
+
+                <th>
+                    Collection / Set
+                </th>
+
+                <th>
+                    Total Cards
+                </th>
+
+                <th>
+                    Unique Cards
+                </th>
+
+                <th>
+                    Current Value
+                </th>
+
+            </tr>
+
+        </thead>
+
+
+        <tbody>
+
+        {% for row in set_rows %}
+
+            <tr>
+
+                <td>
+                    <strong>
+                        {{ row.set_code }}
+                    </strong>
+                </td>
+
+                <td>
+                    {{ row.set_name }}
+                </td>
+
+                <td>
+                    {{ row.total_cards }}
+                </td>
+
+                <td>
+                    {{ row.unique_cards }}
+                </td>
+
+                <td>
+                    ${{ "%.2f"|format(row.total_value) }}
+                </td>
+
+            </tr>
+
+        {% endfor %}
+
+        </tbody>
+
+    </table>
+
+</div>
+
+{% endblock %}
