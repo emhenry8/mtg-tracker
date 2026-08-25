@@ -12,17 +12,77 @@
 <p class="muted">{{ deck.notes }}</p>
 {% endif %}
 
+{% if standard_legality %}
+<p class="muted" style="font-size: 13px;">
+    Standard Legality:
+    {% if standard_legality.warnings %}
+    <details style="display: inline;">
+        <summary style="display: inline; cursor: pointer;">
+            &#9888; {{ standard_legality.warnings|length }}
+            issue{{ "s" if standard_legality.warnings|length != 1 else "" }}
+        </summary>
+        <ul style="margin: 6px 0 0 0;">
+            {% for warning in standard_legality.warnings %}
+            <li>{{ warning }}</li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% else %}
+    &#10003; Legal
+    {% endif %}
+    {% if standard_legality.unknown_count %}
+    ({{ standard_legality.unknown_count }} card{{ "s" if standard_legality.unknown_count != 1 else "" }}
+    not yet checked &mdash; refresh prices to update)
+    {% endif %}
+</p>
+{% endif %}
+
+{% if mana_base %}
+<p class="muted" style="font-size: 13px;">
+    Mana Base:
+    {% if mana_base.warnings %}
+    <details style="display: inline;">
+        <summary style="display: inline; cursor: pointer;">
+            &#9888; {{ mana_base.warnings|length }}
+            issue{{ "s" if mana_base.warnings|length != 1 else "" }}
+        </summary>
+        <ul style="margin: 6px 0 0 0;">
+            {% for warning in mana_base.warnings %}
+            <li>{{ warning }}</li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% else %}
+    &#10003; OK
+    {% endif %}
+    {% if mana_base.unknown_land_count %}
+    ({{ mana_base.unknown_land_count }} land{{ "s" if mana_base.unknown_land_count != 1 else "" }}
+    not yet checked &mdash; refresh prices to update)
+    {% endif %}
+</p>
+{% endif %}
+
 
 <div class="stats">
 
     <div class="stat">
         <div class="muted">Mainboard</div>
-        <div class="stat-number">{{ mainboard_count }}</div>
+        <div class="stat-number" id="stat-mainboard-count">{{ mainboard_count }}</div>
     </div>
 
     <div class="stat">
         <div class="muted">Sideboard</div>
-        <div class="stat-number">{{ sideboard_count }}</div>
+        <div class="stat-number" id="stat-sideboard-count">{{ sideboard_count }}</div>
+    </div>
+
+    <div class="stat">
+        <div class="muted">Mainboard Cost</div>
+        <div class="stat-number">$<span id="stat-mainboard-cost">{{ "%.2f"|format(mainboard_cost) }}</span></div>
+    </div>
+
+    <div class="stat">
+        <div class="muted">Sideboard Cost</div>
+        <div class="stat-number">$<span id="stat-sideboard-cost">{{ "%.2f"|format(sideboard_cost) }}</span></div>
     </div>
 
 </div>
@@ -35,6 +95,167 @@
             Export Decklist (.txt)
         </button>
     </a>
+
+    <a href="/decks/{{ deck.id }}/hand">
+        <button type="button" class="secondary">
+            Opening Hand Simulator
+        </button>
+    </a>
+
+</div>
+
+
+<div class="card" style="margin-bottom: 25px;">
+
+    <h2>Standard 60-Card Deck Guide</h2>
+
+    <p class="muted" style="margin-top: -5px;">
+        A rough starting point for a mono/two-color Standard-constructed deck. Adjust to taste.
+    </p>
+
+    <div style="overflow-x: auto;">
+    <table>
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Typical Count</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Lands</td>
+                <td>22&ndash;24</td>
+                <td>Roughly 40% of the deck (24 is a common default). Split by color pip weight, plus any utility lands.</td>
+            </tr>
+            <tr>
+                <td>Creatures</td>
+                <td>14&ndash;17</td>
+                <td>The core of most decks' game plan and win conditions.</td>
+            </tr>
+            <tr>
+                <td>Removal / Interaction</td>
+                <td>6&ndash;10</td>
+                <td>Instants/sorceries that answer opposing threats (kill spells, bounce, counters).</td>
+            </tr>
+            <tr>
+                <td>Other Spells</td>
+                <td>4&ndash;8</td>
+                <td>Card draw, pump/combat tricks, planeswalkers, artifacts, enchantments.</td>
+            </tr>
+            <tr>
+                <td>Nonland Subtotal</td>
+                <td>~36</td>
+                <td>The remaining 60% of the deck, split across the categories above.</td>
+            </tr>
+            <tr>
+                <td>Total</td>
+                <td>60</td>
+                <td>Minimum legal deck size &mdash; most decks stay at exactly 60.</td>
+            </tr>
+        </tbody>
+    </table>
+    </div>
+
+    <p class="muted" style="font-size: 13px; margin-bottom: 0;">
+        Mana curve: aim for most of your nonland spells to cost 1&ndash;4 mana, tapering off
+        sharply above 5, so you reliably have plays on curve.
+    </p>
+
+</div>
+
+
+<div class="card" style="margin-bottom: 25px;">
+
+    {% set comp = composition %}
+
+    <h2>Deck Composition (Mainboard)</h2>
+
+    {% if comp.total == 0 %}
+
+    <p class="muted">Add cards to the mainboard to see a breakdown here.</p>
+
+    {% else %}
+
+    <div class="stats" style="margin-bottom: 20px;">
+
+        <div class="stat">
+            <div class="muted">Total</div>
+            <div class="stat-number">{{ comp.total }} / 60</div>
+        </div>
+
+        <div class="stat">
+            <div class="muted">Lands</div>
+            <div class="stat-number">{{ comp.land_count }}</div>
+        </div>
+
+        <div class="stat">
+            <div class="muted">Nonland Spells</div>
+            <div class="stat-number">{{ comp.nonland_count }}</div>
+        </div>
+
+    </div>
+
+    {% macro breakdown_bar(label, count, total, display=none) %}
+
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+
+        <div style="width: 130px; flex-shrink: 0; font-size: 13px;">{{ label }}</div>
+
+        <div style="flex: 1; background: #eee; border-radius: 4px; overflow: hidden; height: 14px;">
+            <div style="width: {{ (count / total * 100) if total else 0 }}%; background: #4a6fa5; height: 100%;"></div>
+        </div>
+
+        <div class="muted" style="width: 30px; text-align: right; font-size: 13px;">{{ display if display is not none else count }}</div>
+
+    </div>
+
+    {% endmacro %}
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 25px;">
+
+        <div>
+            <h3 style="margin-top: 0;">By Card Type</h3>
+            {% for category, count in comp.type_counts.items() %}
+            {% if count > 0 %}
+            {{ breakdown_bar(category, count, comp.total) }}
+            {% endif %}
+            {% endfor %}
+        </div>
+
+        <div>
+            <h3 style="margin-top: 0;">Colored Mana Symbols</h3>
+            {% if comp.total_pips == 0 %}
+            <p class="muted" style="font-size: 13px;">No colored mana costs yet.</p>
+            {% else %}
+            {% for code, label in colors %}
+            {% if code in comp.pip_counts and comp.pip_counts[code] > 0 %}
+            {{ breakdown_bar(label, comp.pip_counts[code], comp.total_pips, display="%g"|format(comp.pip_counts[code])) }}
+            {% endif %}
+            {% endfor %}
+            <p class="muted" style="font-size: 12px; margin-top: 10px;">
+                Counts colored mana symbols in casting costs (hybrid symbols split
+                between colors) &mdash; a rough guide to how to weight your land colors.
+            </p>
+            {% endif %}
+        </div>
+
+        <div>
+            <h3 style="margin-top: 0;">Mana Curve (nonland)</h3>
+            {% if comp.nonland_count == 0 %}
+            <p class="muted" style="font-size: 13px;">No nonland cards yet.</p>
+            {% else %}
+            {% for bucket, count in comp.curve.items() %}
+            {% if count > 0 %}
+            {{ breakdown_bar("CMC " + bucket, count, comp.nonland_count) }}
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+        </div>
+
+    </div>
+
+    {% endif %}
 
 </div>
 
@@ -80,7 +301,101 @@
 </div>
 
 
-{% macro deck_card_table(rows, section) %}
+{% macro deck_qty_remove_form(deck_card) %}
+
+    <form
+        method="post"
+        action="/decks/{{ deck.id }}/cards/{{ deck_card.id }}/quantity"
+        class="js-deck-qty-set"
+        style="display: flex; gap: 6px; align-items: center;"
+    >
+        <input
+            class="small-input qty-input"
+            type="number"
+            name="quantity"
+            min="0"
+            value="{{ deck_card.quantity }}"
+        >
+        <button type="submit">Save</button>
+    </form>
+
+    <form
+        method="post"
+        action="/decks/{{ deck.id }}/cards/{{ deck_card.id }}/delete"
+        class="js-deck-card-remove"
+    >
+        <button type="submit" class="danger">Remove</button>
+    </form>
+
+{% endmacro %}
+
+
+{% macro deck_section(rows, section) %}
+
+{% if filters.deck_view == "gallery" %}
+
+<div class="gallery-grid" id="{{ section }}-body">
+
+{% for deck_card in rows %}
+
+<div
+    class="gallery-card"
+    data-row
+    data-deck-card-id="{{ deck_card.id }}"
+    data-card-id="{{ deck_card.card_id }}"
+>
+
+    {% if deck_card.card.image_url %}
+
+    <img
+        src="{{ deck_card.card.image_url }}"
+        alt="{{ deck_card.card.name }}"
+        loading="lazy"
+    >
+
+    {% else %}
+
+    <div class="gallery-placeholder">
+        {{ deck_card.card.name }}
+    </div>
+
+    {% endif %}
+
+    <div class="gallery-body">
+
+        <div class="muted" style="font-size: 12px;">
+            {{ deck_card.card.set_code }} #{{ deck_card.card.collector_number }}
+            &middot; {{ deck_card.card.rarity|capitalize }}
+        </div>
+
+        <div class="muted" style="font-size: 11px; margin-top: 2px;">
+            {{ deck_card.card.type_line }}
+        </div>
+
+        <div class="muted" style="font-size: 11px; margin-top: 2px;">
+            {{ deck_card.card.mana_cost or "" }}
+            &middot; Owned: {{ owned_by_card_id.get(deck_card.card_id, 0) }}
+        </div>
+
+        <div style="display: flex; gap: 6px; align-items: center; margin-top: 8px;">
+            {{ deck_qty_remove_form(deck_card) }}
+        </div>
+
+    </div>
+
+</div>
+
+{% else %}
+
+<div class="empty-row muted">
+    No cards in the {{ section }} yet.
+</div>
+
+{% endfor %}
+
+</div>
+
+{% else %}
 
 <div style="overflow-x: auto;">
 
@@ -90,35 +405,73 @@
         <tr>
             <th>Name</th>
             <th>Set</th>
+
+            {% if filters.deck_view == "detailed" %}
+            <th>Type</th>
+            <th>Cost</th>
+            <th>Rarity</th>
+            {% endif %}
+
             <th>Owned</th>
+
+            {% if filters.deck_view == "detailed" %}
+            <th style="min-width: 260px;">Description</th>
+            {% endif %}
+
             <th>Qty</th>
             <th></th>
         </tr>
     </thead>
 
-    <tbody>
+    <tbody id="{{ section }}-body">
 
     {% for deck_card in rows %}
 
-    <tr>
+    <tr
+        data-row
+        data-deck-card-id="{{ deck_card.id }}"
+        data-card-id="{{ deck_card.card_id }}"
+    >
         <td>{{ deck_card.card.name }}</td>
 
         <td class="muted">
             {{ deck_card.card.set_code }} #{{ deck_card.card.collector_number }}
         </td>
 
+        {% if filters.deck_view == "detailed" %}
+
+        <td class="muted">{{ deck_card.card.type_line }}</td>
+
+        <td class="muted">{{ deck_card.card.mana_cost or "—" }}</td>
+
+        <td>{{ deck_card.card.rarity|capitalize }}</td>
+
+        {% endif %}
+
         <td class="muted">
             {{ owned_by_card_id.get(deck_card.card_id, 0) }}
         </td>
+
+        {% if filters.deck_view == "detailed" %}
+
+        <td
+            class="muted"
+            style="font-size: 12px; max-width: 320px; white-space: pre-wrap;"
+        >
+            {{ deck_card.card.oracle_text or "" }}
+        </td>
+
+        {% endif %}
 
         <td>
             <form
                 method="post"
                 action="/decks/{{ deck.id }}/cards/{{ deck_card.id }}/quantity"
+                class="js-deck-qty-set"
                 style="display: flex; gap: 6px; align-items: center;"
             >
                 <input
-                    class="small-input"
+                    class="small-input qty-input"
                     type="number"
                     name="quantity"
                     min="0"
@@ -132,6 +485,7 @@
             <form
                 method="post"
                 action="/decks/{{ deck.id }}/cards/{{ deck_card.id }}/delete"
+                class="js-deck-card-remove"
             >
                 <button type="submit" class="danger">Remove</button>
             </form>
@@ -140,8 +494,8 @@
 
     {% else %}
 
-    <tr>
-        <td colspan="5" class="muted">
+    <tr class="empty-row">
+        <td colspan="{% if filters.deck_view == 'detailed' %}9{% else %}5{% endif %}" class="muted">
             No cards in the {{ section }} yet.
         </td>
     </tr>
@@ -154,17 +508,49 @@
 
 </div>
 
+{% endif %}
+
 {% endmacro %}
+
+
+<div class="filters" style="margin-bottom: 15px;">
+
+    <div class="view-switcher">
+
+        <a
+            href="{{ request.url.include_query_params(deck_view='basic') }}"
+            class="{% if filters.deck_view == 'basic' %}active{% endif %}"
+        >
+            Basic View
+        </a>
+
+        <a
+            href="{{ request.url.include_query_params(deck_view='detailed') }}"
+            class="{% if filters.deck_view == 'detailed' %}active{% endif %}"
+        >
+            Detailed List View
+        </a>
+
+        <a
+            href="{{ request.url.include_query_params(deck_view='gallery') }}"
+            class="{% if filters.deck_view == 'gallery' %}active{% endif %}"
+        >
+            Gallery View
+        </a>
+
+    </div>
+
+</div>
 
 
 <div class="card" style="margin-bottom: 25px;">
     <h2>Mainboard</h2>
-    {{ deck_card_table(mainboard, "mainboard") }}
+    {{ deck_section(mainboard, "mainboard") }}
 </div>
 
 <div class="card" style="margin-bottom: 25px;">
     <h2>Sideboard</h2>
-    {{ deck_card_table(sideboard, "sideboard") }}
+    {{ deck_section(sideboard, "sideboard") }}
 </div>
 
 
@@ -245,15 +631,131 @@
 
         </div>
 
+        <input type="hidden" name="view" value="{{ filters.view }}">
+        <input type="hidden" name="deck_view" value="{{ filters.deck_view }}">
+
     </form>
 
+    <div class="view-switcher">
+
+        <a
+            href="{{ request.url.include_query_params(view='list') }}"
+            class="{% if filters.view == 'list' %}active{% endif %}"
+        >
+            List View
+        </a>
+
+        <a
+            href="{{ request.url.include_query_params(view='gallery') }}"
+            class="{% if filters.view == 'gallery' %}active{% endif %}"
+        >
+            Gallery View
+        </a>
+
+    </div>
+
 </div>
+
+
+{% macro add_to_deck_form(entry) %}
+
+<form
+    method="post"
+    action="/decks/{{ deck.id }}/cards"
+    class="js-deck-add"
+    style="display: flex; gap: 6px; align-items: center;"
+>
+    <input type="hidden" name="card_id" value="{{ entry.card.id }}">
+
+    <select name="section">
+        <option value="mainboard">Mainboard</option>
+        <option value="sideboard">Sideboard</option>
+    </select>
+
+    <input
+        class="small-input qty-add-input"
+        type="number"
+        name="quantity"
+        min="1"
+        max="{{ entry.owned_qty }}"
+        value="1"
+    >
+
+    <button type="submit" class="positive">Add</button>
+</form>
+
+{% endmacro %}
 
 
 {% if not browse_cards %}
 
 <div class="card">
     No cards in your collection match these filters.
+</div>
+
+{% elif filters.view == "gallery" %}
+
+<div class="gallery-grid">
+
+{% for entry in browse_cards %}
+
+<div
+    class="gallery-card"
+    data-browse-row
+    data-card-id="{{ entry.card.id }}"
+    data-card-name="{{ entry.card.name }}"
+    data-set-code="{{ entry.card.set_code }}"
+    data-collector-number="{{ entry.card.collector_number }}"
+    data-owned-qty="{{ entry.owned_qty }}"
+    data-type-line="{{ entry.card.type_line or '' }}"
+    data-mana-cost="{{ entry.card.mana_cost or '' }}"
+    data-rarity="{{ entry.card.rarity or '' }}"
+    data-oracle-text="{{ entry.card.oracle_text or '' }}"
+    data-image-url="{{ entry.card.image_url or '' }}"
+>
+
+    {% if entry.card.image_url %}
+
+    <img
+        src="{{ entry.card.image_url }}"
+        alt="{{ entry.card.name }}"
+        loading="lazy"
+    >
+
+    {% else %}
+
+    <div class="gallery-placeholder">
+        {{ entry.card.name }}
+    </div>
+
+    {% endif %}
+
+    <div class="gallery-body">
+
+        <div class="muted" style="font-size: 12px;">
+            {{ entry.card.set_code }} #{{ entry.card.collector_number }}
+            &middot; {{ entry.card.rarity|capitalize }}
+        </div>
+
+        <div class="muted" style="font-size: 11px; margin-top: 2px;">
+            {{ entry.card.type_line }}
+        </div>
+
+        <div class="muted" style="font-size: 11px; margin-top: 2px;">
+            {{ entry.card.mana_cost or "" }}
+            &middot; Owned: {{ entry.owned_qty }}
+        </div>
+
+        <div style="margin-top: 8px;">
+            {{ add_to_deck_form(entry) }}
+        </div>
+
+    </div>
+
+</div>
+
+{% endfor %}
+
 </div>
 
 {% else %}
@@ -266,8 +768,11 @@
         <tr>
             <th>Name</th>
             <th>Set</th>
+            <th>Type</th>
+            <th>Cost</th>
             <th>Rarity</th>
             <th>Owned</th>
+            <th style="min-width: 260px;">Description</th>
             <th>Add</th>
         </tr>
     </thead>
@@ -276,41 +781,42 @@
 
     {% for entry in browse_cards %}
 
-    <tr>
+    <tr
+        data-browse-row
+        data-card-id="{{ entry.card.id }}"
+        data-card-name="{{ entry.card.name }}"
+        data-set-code="{{ entry.card.set_code }}"
+        data-collector-number="{{ entry.card.collector_number }}"
+        data-owned-qty="{{ entry.owned_qty }}"
+        data-type-line="{{ entry.card.type_line or '' }}"
+        data-mana-cost="{{ entry.card.mana_cost or '' }}"
+        data-rarity="{{ entry.card.rarity or '' }}"
+        data-oracle-text="{{ entry.card.oracle_text or '' }}"
+        data-image-url="{{ entry.card.image_url or '' }}"
+    >
         <td>{{ entry.card.name }}</td>
 
         <td class="muted">
             {{ entry.card.set_code }} #{{ entry.card.collector_number }}
         </td>
 
+        <td class="muted">{{ entry.card.type_line }}</td>
+
+        <td class="muted">{{ entry.card.mana_cost or "—" }}</td>
+
         <td>{{ entry.card.rarity|capitalize }}</td>
 
         <td>{{ entry.owned_qty }}</td>
 
+        <td
+            class="muted"
+            style="font-size: 12px; max-width: 320px; white-space: pre-wrap;"
+        >
+            {{ entry.card.oracle_text or "" }}
+        </td>
+
         <td>
-            <form
-                method="post"
-                action="/decks/{{ deck.id }}/cards"
-                style="display: flex; gap: 6px; align-items: center;"
-            >
-                <input type="hidden" name="card_id" value="{{ entry.card.id }}">
-
-                <select name="section">
-                    <option value="mainboard">Mainboard</option>
-                    <option value="sideboard">Sideboard</option>
-                </select>
-
-                <input
-                    class="small-input"
-                    type="number"
-                    name="quantity"
-                    min="1"
-                    max="{{ entry.owned_qty }}"
-                    value="1"
-                >
-
-                <button type="submit" class="positive">Add</button>
-            </form>
+            {{ add_to_deck_form(entry) }}
         </td>
     </tr>
 
@@ -323,5 +829,347 @@
 </div>
 
 {% endif %}
+
+
+<script>
+    (function () {
+
+        var deckId = {{ deck.id }};
+        var deckView = "{{ filters.deck_view }}";
+
+        function updateDeckCounts(mainboardCount, sideboardCount, mainboardCost, sideboardCost) {
+
+            var mainboardEl = document.getElementById("stat-mainboard-count");
+            var sideboardEl = document.getElementById("stat-sideboard-count");
+            var mainboardCostEl = document.getElementById("stat-mainboard-cost");
+            var sideboardCostEl = document.getElementById("stat-sideboard-cost");
+
+            if (mainboardEl) {
+                mainboardEl.textContent = mainboardCount;
+            }
+
+            if (sideboardEl) {
+                sideboardEl.textContent = sideboardCount;
+            }
+
+            if (mainboardCostEl && mainboardCost !== undefined) {
+                mainboardCostEl.textContent = mainboardCost.toFixed(2);
+            }
+
+            if (sideboardCostEl && sideboardCost !== undefined) {
+                sideboardCostEl.textContent = sideboardCost.toFixed(2);
+            }
+        }
+
+        function addEmptyRow(container) {
+
+            var section = container.id.replace("-body", "");
+
+            if (deckView === "gallery") {
+
+                var div = document.createElement("div");
+                div.className = "empty-row muted";
+                div.textContent = "No cards in the " + section + " yet.";
+                container.appendChild(div);
+                return;
+            }
+
+            var colspan = deckView === "detailed" ? 9 : 5;
+
+            var tr = document.createElement("tr");
+            tr.className = "empty-row";
+            tr.innerHTML =
+                '<td colspan="' + colspan + '" class="muted">No cards in the ' +
+                section +
+                " yet.</td>";
+
+            container.appendChild(tr);
+        }
+
+        function removeEmptyRow(container) {
+
+            var emptyRow = container.querySelector(".empty-row");
+
+            if (emptyRow) {
+                emptyRow.remove();
+            }
+        }
+
+        function escapeHtml(value) {
+            var div = document.createElement("div");
+            div.textContent = value || "";
+            return div.innerHTML;
+        }
+
+        function capitalize(value) {
+            value = value || "";
+            return value.charAt(0).toUpperCase() + value.slice(1);
+        }
+
+        function deckQtyFormHtml(deckCardId, quantity) {
+            return (
+                '<form method="post" action="/decks/' + deckId + "/cards/" + deckCardId + '/quantity" class="js-deck-qty-set" style="display: flex; gap: 6px; align-items: center;">' +
+                    '<input class="small-input qty-input" type="number" name="quantity" min="0" value="' + quantity + '">' +
+                    '<button type="submit">Save</button>' +
+                "</form>"
+            );
+        }
+
+        function deckRemoveFormHtml(deckCardId) {
+            return (
+                '<form method="post" action="/decks/' + deckId + "/cards/" + deckCardId + '/delete" class="js-deck-card-remove">' +
+                    '<button type="submit" class="danger">Remove</button>' +
+                "</form>"
+            );
+        }
+
+        function buildDeckCardRow(deckCardId, cardId, data, quantity) {
+
+            if (deckView === "gallery") {
+
+                var card = document.createElement("div");
+                card.className = "gallery-card";
+                card.dataset.row = "";
+                card.dataset.deckCardId = deckCardId;
+                card.dataset.cardId = cardId;
+
+                var imageHtml = data.imageUrl
+                    ? '<img src="' + escapeHtml(data.imageUrl) + '" alt="' + escapeHtml(data.cardName) + '" loading="lazy">'
+                    : '<div class="gallery-placeholder">' + escapeHtml(data.cardName) + "</div>";
+
+                card.innerHTML =
+                    imageHtml +
+                    '<div class="gallery-body">' +
+                        '<div class="muted" style="font-size: 12px;">' +
+                            escapeHtml(data.setCode) + " #" + escapeHtml(data.collectorNumber) +
+                            " &middot; " + escapeHtml(capitalize(data.rarity)) +
+                        "</div>" +
+                        '<div class="muted" style="font-size: 11px; margin-top: 2px;">' + escapeHtml(data.typeLine) + "</div>" +
+                        '<div class="muted" style="font-size: 11px; margin-top: 2px;">' +
+                            escapeHtml(data.manaCost) + " &middot; Owned: " + escapeHtml(data.ownedQty) +
+                        "</div>" +
+                        '<div style="display: flex; gap: 6px; align-items: center; margin-top: 8px;">' +
+                            deckQtyFormHtml(deckCardId, quantity) +
+                            deckRemoveFormHtml(deckCardId) +
+                        "</div>" +
+                    "</div>";
+
+                return card;
+            }
+
+            var tr = document.createElement("tr");
+
+            tr.dataset.row = "";
+            tr.dataset.deckCardId = deckCardId;
+            tr.dataset.cardId = cardId;
+
+            var cells =
+                "<td>" + escapeHtml(data.cardName) + "</td>" +
+                '<td class="muted">' + escapeHtml(data.setCode) + " #" + escapeHtml(data.collectorNumber) + "</td>";
+
+            if (deckView === "detailed") {
+                cells +=
+                    '<td class="muted">' + escapeHtml(data.typeLine) + "</td>" +
+                    '<td class="muted">' + (escapeHtml(data.manaCost) || "—") + "</td>" +
+                    "<td>" + escapeHtml(capitalize(data.rarity)) + "</td>";
+            }
+
+            cells += '<td class="muted">' + escapeHtml(data.ownedQty) + "</td>";
+
+            if (deckView === "detailed") {
+                cells +=
+                    '<td class="muted" style="font-size: 12px; max-width: 320px; white-space: pre-wrap;">' +
+                        escapeHtml(data.oracleText) +
+                    "</td>";
+            }
+
+            cells +=
+                "<td>" + deckQtyFormHtml(deckCardId, quantity) + "</td>" +
+                "<td>" + deckRemoveFormHtml(deckCardId) + "</td>";
+
+            tr.innerHTML = cells;
+
+            return tr;
+        }
+
+        function handleDeckAdd(form, event) {
+
+            event.preventDefault();
+
+            var browseRow = form.closest("[data-browse-row]");
+
+            if (!browseRow) {
+                return;
+            }
+
+            var cardId = browseRow.dataset.cardId;
+            var section = form.querySelector('select[name="section"]').value;
+
+            fetch(form.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "fetch" },
+                body: new FormData(form),
+            })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error("Request failed");
+                    }
+                    return response.json();
+                })
+                .then(function (data) {
+
+                    updateDeckCounts(data.mainboard_count, data.sideboard_count, data.mainboard_cost, data.sideboard_cost);
+
+                    var tbody = document.getElementById(section + "-body");
+
+                    if (!tbody) {
+                        return;
+                    }
+
+                    var row = tbody.querySelector(
+                        '[data-card-id="' + cardId + '"]'
+                    );
+
+                    if (data.deleted) {
+
+                        if (row) {
+                            row.remove();
+                        }
+
+                        if (!tbody.querySelector("[data-row]")) {
+                            addEmptyRow(tbody);
+                        }
+
+                        return;
+                    }
+
+                    if (row) {
+
+                        row.dataset.deckCardId = data.deck_card_id;
+
+                        row.querySelectorAll(".qty-input").forEach(function (el) {
+                            el.value = data.quantity;
+                        });
+
+                        var qtyForm = row.querySelector(".js-deck-qty-set");
+                        var removeForm = row.querySelector(".js-deck-card-remove");
+
+                        if (qtyForm) {
+                            qtyForm.action = "/decks/" + deckId + "/cards/" + data.deck_card_id + "/quantity";
+                        }
+
+                        if (removeForm) {
+                            removeForm.action = "/decks/" + deckId + "/cards/" + data.deck_card_id + "/delete";
+                        }
+
+                        return;
+                    }
+
+                    removeEmptyRow(tbody);
+
+                    tbody.appendChild(
+                        buildDeckCardRow(
+                            data.deck_card_id,
+                            cardId,
+                            {
+                                cardName: browseRow.dataset.cardName,
+                                setCode: browseRow.dataset.setCode,
+                                collectorNumber: browseRow.dataset.collectorNumber,
+                                ownedQty: browseRow.dataset.ownedQty,
+                                typeLine: browseRow.dataset.typeLine,
+                                manaCost: browseRow.dataset.manaCost,
+                                rarity: browseRow.dataset.rarity,
+                                oracleText: browseRow.dataset.oracleText,
+                                imageUrl: browseRow.dataset.imageUrl,
+                            },
+                            data.quantity
+                        )
+                    );
+                })
+                .catch(function () {
+                    alert("Could not add card to deck — please try again.");
+                });
+        }
+
+        function handleDeckRowMutation(form, event) {
+
+            event.preventDefault();
+
+            var row = form.closest("[data-row]");
+
+            if (!row) {
+                return;
+            }
+
+            fetch(form.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "fetch" },
+                body: new FormData(form),
+            })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error("Request failed");
+                    }
+                    return response.json();
+                })
+                .then(function (data) {
+
+                    updateDeckCounts(data.mainboard_count, data.sideboard_count, data.mainboard_cost, data.sideboard_cost);
+
+                    if (data.deleted) {
+
+                        var tbody = row.parentElement;
+
+                        row.remove();
+
+                        if (tbody && !tbody.querySelector("[data-row]")) {
+                            addEmptyRow(tbody);
+                        }
+
+                        return;
+                    }
+
+                    row.querySelectorAll(".qty-input").forEach(function (el) {
+                        el.value = data.quantity;
+                    });
+                })
+                .catch(function () {
+                    alert("Could not update the deck — please try again.");
+                });
+        }
+
+        document.addEventListener("submit", function (event) {
+
+            var form = event.target;
+
+            if (form.classList.contains("js-deck-add")) {
+                handleDeckAdd(form, event);
+            } else if (
+                form.classList.contains("js-deck-qty-set") ||
+                form.classList.contains("js-deck-card-remove")
+            ) {
+                handleDeckRowMutation(form, event);
+            }
+        });
+
+        // Auto-save a deck row's quantity box when you tab/click away
+        // after changing it.
+        document.addEventListener("change", function (event) {
+
+            var input = event.target;
+
+            if (!input.classList.contains("qty-input")) {
+                return;
+            }
+
+            var form = input.closest("form.js-deck-qty-set");
+
+            if (form) {
+                form.requestSubmit();
+            }
+        });
+
+    })();
+</script>
 
 {% endblock %}

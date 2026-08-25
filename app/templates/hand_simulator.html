@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<p>
+    <a href="/decks/{{ deck.id }}">&larr; {{ deck.name }}</a>
+</p>
+
+<h1>Opening Hand &mdash; {{ deck.name }}</h1>
+
+<p class="muted">
+    Draws a 7-card hand without replacement from your {{ pool_size }}-card mainboard &mdash;
+    once a copy is drawn it isn't available to draw again in that hand, so a deck with
+    4 copies of a card can never show 5 of them in one hand.
+</p>
+
+{% if pool_size < 7 %}
+
+<div class="card">
+    Your mainboard has fewer than 7 cards ({{ pool_size }}) &mdash; add more cards to draw a full hand.
+</div>
+
+{% else %}
+
+<div class="actions" style="margin-bottom: 20px;">
+    <a href="/decks/{{ deck.id }}/hand">
+        <button type="button" class="positive">Draw New Hand</button>
+    </a>
+</div>
+
+<div class="card" style="margin-bottom: 25px;">
+
+    <h2>Your Hand</h2>
+
+    <div class="gallery-grid">
+
+    {% for card in hand %}
+
+    <div class="gallery-card">
+
+        {% if card.image_url %}
+
+        <img
+            src="{{ card.image_url }}"
+            alt="{{ card.name }}"
+            loading="lazy"
+        >
+
+        {% else %}
+
+        <div class="gallery-placeholder">
+            {{ card.name }}
+        </div>
+
+        {% endif %}
+
+        <div class="gallery-body">
+
+            <div class="muted" style="font-size: 12px;">
+                {{ card.set_code }} #{{ card.collector_number }}
+            </div>
+
+            <div class="muted" style="font-size: 11px; margin-top: 2px;">
+                {{ card.type_line }}
+            </div>
+
+            <div class="muted" style="font-size: 11px; margin-top: 2px;">
+                {{ card.mana_cost or "" }}
+            </div>
+
+        </div>
+
+    </div>
+
+    {% endfor %}
+
+    </div>
+
+</div>
+
+
+<div class="card">
+
+    <h2>Odds Over {{ "{:,}".format(stats.trials) }} Simulated Hands</h2>
+
+    <div class="stats" style="margin-bottom: 20px;">
+
+        <div class="stat">
+            <div class="muted">Average Lands in Hand</div>
+            <div class="stat-number">{{ "%.2f"|format(stats.avg_lands) }}</div>
+        </div>
+
+        <div class="stat">
+            <div class="muted">Keepable Hands (2&ndash;5 lands)</div>
+            <div class="stat-number">{{ "%.0f"|format(stats.keepable_pct) }}%</div>
+        </div>
+
+    </div>
+
+    {% macro stat_bar(label, pct, count) %}
+
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+
+        <div style="width: 90px; flex-shrink: 0; font-size: 13px;">{{ label }}</div>
+
+        <div style="flex: 1; background: #eee; border-radius: 4px; overflow: hidden; height: 14px;">
+            <div style="width: {{ pct }}%; background: #4a6fa5; height: 100%;"></div>
+        </div>
+
+        <div class="muted" style="width: 70px; text-align: right; font-size: 13px;">{{ "%.1f"|format(pct) }}%</div>
+
+    </div>
+
+    {% endmacro %}
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 25px;">
+
+        <div>
+            <h3 style="margin-top: 0;">Lands in Opening Hand</h3>
+            {% for entry in stats.land_distribution %}
+            {{ stat_bar(entry.lands ~ " land" ~ ("s" if entry.lands != 1 else ""), entry.pct, entry.count) }}
+            {% endfor %}
+        </div>
+
+        <div>
+            <h3 style="margin-top: 0;">Average Card Types in Hand</h3>
+            {% for category, avg in stats.avg_by_type.items() %}
+            {{ stat_bar(category, 100 * avg / stats.hand_size, avg) }}
+            {% endfor %}
+            <p class="muted" style="font-size: 12px; margin-top: 10px;">
+                Bars show each type's share of a {{ stats.hand_size }}-card hand
+                (e.g. an average of {{ "%.1f"|format(stats.avg_by_type.get("Creature", 0)) }} creatures per hand).
+            </p>
+        </div>
+
+    </div>
+
+</div>
+
+{% endif %}
+
+{% endblock %}

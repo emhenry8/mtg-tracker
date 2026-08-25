@@ -1,6 +1,13 @@
+import asyncio
 import csv
+import json
+import os
+import random
 import re
 
+import requests
+
+from collections import Counter
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from io import StringIO
@@ -16,6 +23,7 @@ from fastapi import (
 )
 
 from fastapi.responses import (
+    JSONResponse,
     RedirectResponse,
     Response,
 )
@@ -29,10 +37,11 @@ from sqlalchemy import (
 
 from sqlalchemy.orm import Session
 
-from .database import get_db
+from .database import get_db, SessionLocal
 
 from .models import (
     Card,
+    CollectionValueSnapshot,
     Deck,
     DeckCard,
     Inventory,
@@ -46,13 +55,49 @@ from .scryfall import (
 )
 
 
+WEEKLY_REFRESH_INTERVAL_SECONDS = 7 * 24 * 60 * 60
+
+
+async def weekly_price_refresh_loop():
+    """Refresh every card's Scryfall price and record a collection
+    value snapshot once a week, so the value-history chart fills in on
+    its own without anyone having to click "Refresh Prices"."""
+
+    while True:
+
+        await asyncio.sleep(WEEKLY_REFRESH_INTERVAL_SECONDS)
+
+        db = SessionLocal()
+
+        try:
+
+            await asyncio.to_thread(
+                refresh_prices_and_snapshot,
+                db,
+            )
+
+        except Exception:
+
+            # A Scryfall hiccup shouldn't kill the weekly loop —
+            # just try again next week.
+            pass
+
+        finally:
+
+            db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
     # Database schema migrations are now handled
     # by Alembic before FastAPI starts.
 
+    task = asyncio.create_task(weekly_price_refresh_loop())
+
     yield
+
+    task.cancel()
 
 
 app = FastAPI(
@@ -69,6 +114,8 @@ COLOR_OPTIONS = [
     ("G", "Green"),
     ("colorless", "Colorless"),
 ]
+
+COLOR_NAMES = dict(COLOR_OPTIONS)
 
 
 # Moxfield's collection CSV importer matches columns by name (order
@@ -427,13 +474,21 @@ def add_card(
 @app.get("/bulk-add")
 def bulk_add_form(
     request: Request,
+    db: Session = Depends(get_db),
 ):
+
+    decks = (
+        db.query(Deck)
+        .order_by(Deck.name)
+        .all()
+    )
 
     return render_template(
         request,
         "bulk_add.html",
         {
             "results": None,
+            "decks": decks,
         },
     )
 
@@ -452,8 +507,33 @@ def bulk_add(
 
     quantity: List[str] = Form(default=[]),
 
+    deck_choice: str = Form(""),
+
+    new_deck_name: str = Form(""),
+
+    deck_section: str = Form("mainboard"),
+
     db: Session = Depends(get_db),
 ):
+
+    deck = None
+
+    if deck_choice == "__new__":
+
+        deck = get_or_create_deck_by_name(db, new_deck_name)
+
+    elif deck_choice:
+
+        deck = (
+            db.query(Deck)
+            .filter(Deck.id == int(deck_choice))
+            .first()
+        )
+
+    if deck_section not in DECK_SECTIONS:
+
+        deck_section = "mainboard"
+
 
     results = []
 
@@ -496,6 +576,20 @@ def bulk_add(
             qty,
         )
 
+        if success and deck:
+
+            card = get_or_create_card(db, set_code, number)
+
+            add_card_quantity_to_deck(
+                db,
+                deck.id,
+                card.id,
+                deck_section,
+                qty,
+            )
+
+            message = f"{message} (added to {deck.name})"
+
         results.append({
             "collector_number": number,
             "quantity": qty,
@@ -504,14 +598,22 @@ def bulk_add(
         })
 
 
+    decks = (
+        db.query(Deck)
+        .order_by(Deck.name)
+        .all()
+    )
+
     return render_template(
         request,
         "bulk_add.html",
         {
             "results": results,
+            "decks": decks,
             "last_set_code": set_code.upper().strip(),
             "last_finish": finish,
             "last_treatment": treatment,
+            "deck_link": deck,
         },
     )
 
@@ -1167,6 +1269,7 @@ def slugify_deck_name(
 @app.get("/decks")
 def list_decks(
     request: Request,
+    exported: int = None,
     db: Session = Depends(get_db),
 ):
 
@@ -1207,6 +1310,7 @@ def list_decks(
         "decks.html",
         {
             "deck_rows": deck_rows,
+            "exported": exported,
         },
     )
 
@@ -1416,6 +1520,443 @@ def deck_import(
     )
 
 
+# Order matters: a card's primary type for breakdown purposes is the
+# first of these that appears in its type_line (e.g. an "Artifact
+# Creature" counts as a Creature, a land with a type line like "Land —
+# Gate" still counts as a Land).
+DECK_TYPE_CATEGORIES = [
+    "Land",
+    "Creature",
+    "Planeswalker",
+    "Battle",
+    "Instant",
+    "Sorcery",
+    "Artifact",
+    "Enchantment",
+]
+
+CURVE_BUCKETS = ["0", "1", "2", "3", "4", "5", "6+"]
+
+WUBRG = ("W", "U", "B", "R", "G")
+
+MANA_SYMBOL_RE = re.compile(r"\{([^}]+)\}")
+
+
+def parse_mana_pips(mana_cost):
+    """Count colored mana symbols in a cost string like "{1}{R}{R}",
+    weighting hybrid/Phyrexian symbols across the colors they can pay
+    (e.g. {R/W} is 0.5 pips each of red and white; {R/P} is 1 red pip,
+    since the Phyrexian option doesn't change what color the spell is).
+    Generic and colorless ({2}, {X}, {C}) symbols contribute no pips.
+    """
+
+    pips = Counter()
+
+    for symbol in MANA_SYMBOL_RE.findall(mana_cost or ""):
+
+        colors_in_symbol = [
+            part
+            for part in symbol.split("/")
+            if part in WUBRG
+        ]
+
+        if not colors_in_symbol:
+
+            continue
+
+        weight = 1 / len(colors_in_symbol)
+
+        for color in colors_in_symbol:
+
+            pips[color] += weight
+
+    return pips
+
+
+def categorize_card_type(type_line):
+
+    type_line = type_line or ""
+
+    return next(
+        (
+            option
+            for option in DECK_TYPE_CATEGORIES
+            if option in type_line
+        ),
+        "Other",
+    )
+
+
+MAX_COPIES_NONBASIC = 4
+
+
+def card_standard_legality(card):
+    """The Standard legality status Scryfall reported for this card
+    the last time its data was refreshed, or None if we've never
+    fetched it (e.g. it was added before this field existed)."""
+
+    if not card.legalities:
+
+        return None
+
+    try:
+
+        legalities = json.loads(card.legalities)
+
+    except (TypeError, ValueError):
+
+        return None
+
+    return legalities.get("standard")
+
+
+def check_standard_legality(deck_cards):
+    """A soft, non-blocking check of the mainboard against Standard
+    rules: banned/rotated-out cards and over-the-limit copy counts.
+    Returns a dict with `warnings` (plain-language strings) and
+    `unknown_count` (cards we don't have legality data for yet —
+    running "Refresh Prices" on the Collection page backfills it).
+    """
+
+    warnings = []
+
+    unknown_count = 0
+
+    for deck_card in deck_cards:
+
+        card = deck_card.card
+
+        status = card_standard_legality(card)
+
+        if status is None:
+
+            unknown_count += 1
+
+        elif status == "banned":
+
+            warnings.append(f"{card.name} is banned in Standard")
+
+        elif status != "legal":
+
+            warnings.append(f"{card.name} is not currently legal in Standard")
+
+        is_basic_land = "Basic" in (card.type_line or "")
+
+        if not is_basic_land and deck_card.quantity > MAX_COPIES_NONBASIC:
+
+            warnings.append(
+                f"{deck_card.quantity}x {card.name} exceeds the "
+                f"{MAX_COPIES_NONBASIC}-copy limit"
+            )
+
+    return {
+        "warnings": warnings,
+        "unknown_count": unknown_count,
+    }
+
+
+def check_mana_base(deck_cards):
+    """A soft, non-blocking check that every color a spell needs is
+    actually produced by something in the deck — lands, mana rocks,
+    dorks, anything with Scryfall's "produced_mana" data. Doesn't
+    weigh in on *how many* sources you have, just whether you have
+    zero, which is the case where a card is flatly uncastable.
+    """
+
+    produced_colors = set()
+
+    unknown_land_count = 0
+
+    for deck_card in deck_cards:
+
+        card = deck_card.card
+
+        if card.produced_mana is None:
+
+            if categorize_card_type(card.type_line) == "Land":
+
+                unknown_land_count += 1
+
+            continue
+
+        produced_colors.update(
+            color
+            for color in card.produced_mana.split(",")
+            if color
+        )
+
+    warnings = []
+
+    # If some lands' produced colors are unknown, we can't confidently
+    # claim a color is *missing* — one of those lands might supply it.
+    # Rather than risk a false alarm, hold off on warnings until every
+    # land has been checked (surfaced instead via unknown_land_count).
+    if unknown_land_count == 0:
+
+        for deck_card in deck_cards:
+
+            card = deck_card.card
+
+            if categorize_card_type(card.type_line) == "Land":
+
+                continue
+
+            # Check per mana symbol, not per overall card color — a
+            # hybrid symbol like {U/R} only needs ONE of its colors,
+            # so a card with card.colors "R,U" is castable off just
+            # blue sources even with zero red in the deck.
+            unpayable_symbols = []
+
+            for symbol in MANA_SYMBOL_RE.findall(card.mana_cost or ""):
+
+                colors_in_symbol = [
+                    part
+                    for part in symbol.split("/")
+                    if part in WUBRG
+                ]
+
+                if colors_in_symbol and not (set(colors_in_symbol) & produced_colors):
+
+                    unpayable_symbols.append(tuple(
+                        sorted(colors_in_symbol, key=WUBRG.index)
+                    ))
+
+            if not unpayable_symbols:
+
+                continue
+
+            needs_text = " and ".join(
+                " or ".join(COLOR_NAMES.get(color, color) for color in group)
+                for group in sorted(set(unpayable_symbols))
+            )
+
+            warnings.append(
+                f"{card.name} needs {needs_text} mana, which nothing in "
+                f"your deck produces"
+            )
+
+    return {
+        "warnings": warnings,
+        "unknown_land_count": unknown_land_count,
+    }
+
+
+def deck_card_price(card):
+    """Best-available USD price for a card at its default (nonfoil)
+    finish — DeckCard doesn't track finish, so fall back to whatever
+    price Scryfall has for cards that are only printed as foil/etched.
+    """
+
+    price = (
+        card.price_usd
+        or card.price_usd_foil
+        or card.price_usd_etched
+    )
+
+    return Decimal(price) if price is not None else Decimal("0.00")
+
+
+def deck_section_cost(deck_cards):
+
+    return sum(
+        (
+            deck_card_price(deck_card.card) * deck_card.quantity
+            for deck_card in deck_cards
+        ),
+        Decimal("0.00"),
+    )
+
+
+def summarize_deck_composition(deck_cards):
+    """Build a high-level breakdown of a deck section: card type mix,
+    colored-mana-symbol (pip) weight, and mana curve. Only counts
+    nonland cards toward pips and curve, since lands don't have a
+    casting cost.
+    """
+
+    total = 0
+
+    type_counts = {category: 0 for category in DECK_TYPE_CATEGORIES}
+
+    type_counts["Other"] = 0
+
+    pip_counts = {color: 0.0 for color in WUBRG}
+
+    curve = {bucket: 0 for bucket in CURVE_BUCKETS}
+
+    for deck_card in deck_cards:
+
+        card = deck_card.card
+
+        quantity = deck_card.quantity
+
+        total += quantity
+
+        category = categorize_card_type(card.type_line)
+
+        type_counts[category] += quantity
+
+        if category == "Land":
+
+            continue
+
+        for color, weight in parse_mana_pips(card.mana_cost).items():
+
+            pip_counts[color] += weight * quantity
+
+        cmc = card.cmc
+
+        bucket = "6+" if cmc is None or cmc >= 6 else str(int(cmc))
+
+        curve[bucket] += quantity
+
+    land_count = type_counts["Land"]
+
+    return {
+        "total": total,
+        "land_count": land_count,
+        "nonland_count": total - land_count,
+        "type_counts": type_counts,
+        "pip_counts": pip_counts,
+        "total_pips": sum(pip_counts.values()),
+        "curve": curve,
+    }
+
+
+OPENING_HAND_SIZE = 7
+
+HAND_SIM_TRIALS = 10000
+
+# A 7-card hand with 2-5 lands is generally considered a reasonable
+# keep; outside that range you're flooded or screwed more often than not.
+KEEPABLE_LAND_RANGE = range(2, 6)
+
+
+def build_deck_card_pool(deck_cards):
+    """Flatten a deck section into one list entry per physical copy of
+    each card, so sampling without replacement respects quantities —
+    e.g. you can't draw a 5th copy of a card you only run 4 of, and
+    once a copy is drawn it's gone for the rest of that hand."""
+
+    pool = []
+
+    for deck_card in deck_cards:
+
+        pool.extend([deck_card.card] * deck_card.quantity)
+
+    return pool
+
+
+def draw_opening_hand(pool):
+
+    return random.sample(pool, min(OPENING_HAND_SIZE, len(pool)))
+
+
+def simulate_hand_stats(pool, trials=HAND_SIM_TRIALS):
+    """Draw `trials` independent 7-card hands (each one sampled
+    without replacement from the deck) and summarize the results."""
+
+    hand_size = min(OPENING_HAND_SIZE, len(pool))
+
+    if hand_size == 0:
+
+        return None
+
+    land_counts = Counter()
+
+    type_totals = {category: 0 for category in DECK_TYPE_CATEGORIES}
+
+    type_totals["Other"] = 0
+
+    for _ in range(trials):
+
+        hand = random.sample(pool, hand_size)
+
+        lands_in_hand = 0
+
+        for card in hand:
+
+            category = categorize_card_type(card.type_line)
+
+            type_totals[category] += 1
+
+            if category == "Land":
+
+                lands_in_hand += 1
+
+        land_counts[lands_in_hand] += 1
+
+    land_distribution = [
+        {
+            "lands": n,
+            "count": land_counts.get(n, 0),
+            "pct": 100 * land_counts.get(n, 0) / trials,
+        }
+        for n in range(hand_size + 1)
+    ]
+
+    keepable_pct = 100 * sum(
+        land_counts.get(n, 0)
+        for n in KEEPABLE_LAND_RANGE
+        if n <= hand_size
+    ) / trials
+
+    return {
+        "trials": trials,
+        "hand_size": hand_size,
+        "avg_lands": sum(
+            entry["lands"] * entry["count"] for entry in land_distribution
+        ) / trials,
+        "land_distribution": land_distribution,
+        "keepable_pct": keepable_pct,
+        "avg_by_type": {
+            category: total / trials
+            for category, total in type_totals.items()
+            if total > 0
+        },
+    }
+
+
+@app.get("/decks/{deck_id}/hand")
+def deck_hand_simulator(
+    request: Request,
+    deck_id: int,
+    db: Session = Depends(get_db),
+):
+
+    deck = (
+        db.query(Deck)
+        .filter(Deck.id == deck_id)
+        .first()
+    )
+
+    if not deck:
+
+        return RedirectResponse(
+            url="/decks",
+            status_code=303,
+        )
+
+    mainboard = [
+        deck_card
+        for deck_card in deck.cards
+        if deck_card.section == "mainboard"
+    ]
+
+    pool = build_deck_card_pool(mainboard)
+
+    return render_template(
+        request,
+        "hand_simulator.html",
+        {
+            "deck": deck,
+            "pool_size": len(pool),
+            "hand": draw_opening_hand(pool),
+            "stats": simulate_hand_stats(pool),
+        },
+    )
+
+
 @app.get("/decks/{deck_id}")
 def deck_detail(
     request: Request,
@@ -1427,8 +1968,18 @@ def deck_detail(
     rarity: str = "",
     finish: str = "",
     treatment: str = "",
+    view: str = "list",
+    deck_view: str = "basic",
     db: Session = Depends(get_db),
 ):
+
+    if view not in ("list", "gallery"):
+
+        view = "list"
+
+    if deck_view not in ("basic", "detailed", "gallery"):
+
+        deck_view = "basic"
 
     deck = (
         db.query(Deck)
@@ -1538,6 +2089,13 @@ def deck_detail(
             "sideboard_count": sum(
                 deck_card.quantity for deck_card in sideboard
             ),
+            "composition": summarize_deck_composition(mainboard),
+            "mainboard_cost": deck_section_cost(mainboard),
+            "sideboard_cost": deck_section_cost(sideboard),
+            "standard_legality":
+                check_standard_legality(mainboard) if mainboard else None,
+            "mana_base":
+                check_mana_base(mainboard) if mainboard else None,
             "owned_by_card_id": owned_by_card_id,
             "browse_cards": browse_cards,
             "set_codes": filter_options["set_codes"],
@@ -1553,8 +2111,78 @@ def deck_detail(
                 "rarity": rarity,
                 "finish": finish,
                 "treatment": treatment,
+                "view": view,
+                "deck_view": deck_view,
             },
         },
+    )
+
+
+# Shared with the "bracket" tool container via a docker-compose volume
+# — decks exported here are how an external script (not part of this
+# app) gets at deck lists to run its own tournaments against forge-sim.
+DECK_EXPORT_DIR = Path(
+    os.environ.get(
+        "DECK_EXPORT_DIR",
+        "/data/decks",
+    )
+)
+
+
+# NOTE: registered before "/decks/{deck_id}" below — Starlette matches
+# routes in registration order, and "export-all" would otherwise be
+# swallowed by that route's {deck_id}: int path parameter (and 422,
+# since it doesn't parse as an int).
+@app.post("/decks/export-all")
+def export_all_decks(
+    db: Session = Depends(get_db),
+):
+    """Write every deck with a nonempty mainboard to DECK_EXPORT_DIR as
+    a Forge .dck file, for an external script to read. Clears the
+    directory first so it never accumulates decks that were since
+    renamed, emptied, or deleted."""
+
+    decks = (
+        db.query(Deck)
+        .all()
+    )
+
+    DECK_EXPORT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    for existing in DECK_EXPORT_DIR.glob("*.dck"):
+
+        existing.unlink()
+
+    exported = 0
+
+    for deck in decks:
+
+        mainboard_count = sum(
+            deck_card.quantity
+            for deck_card in deck.cards
+            if deck_card.section == "mainboard"
+        )
+
+        if mainboard_count == 0:
+
+            continue
+
+        filename = (
+            f"{slugify_deck_name(deck.name)}-{deck.id}.dck"
+        )
+
+        (DECK_EXPORT_DIR / filename).write_text(
+            build_dck_text(deck)
+        )
+
+        exported += 1
+
+    return RedirectResponse(
+        url=f"/decks?exported={exported}",
+        status_code=303,
     )
 
 
@@ -1612,14 +2240,21 @@ def delete_deck(
     )
 
 
-@app.post("/decks/{deck_id}/cards")
-def add_card_to_deck(
+def add_card_quantity_to_deck(
+    db: Session,
     deck_id: int,
-    card_id: int = Form(...),
-    section: str = Form("mainboard"),
-    quantity: int = Form(1),
-    db: Session = Depends(get_db),
+    card_id: int,
+    section: str,
+    quantity: int,
 ):
+    """Increment (or create) the DeckCard row for card_id/section on
+    deck_id, capped at the total owned quantity for that card. Shared
+    by the manual add-to-deck endpoint and bulk-add's deck option.
+
+    Returns a dict describing the resulting row —
+    {"deck_card_id", "quantity", "deleted"} — so AJAX callers can
+    patch the deck-detail page without a full reload.
+    """
 
     if section not in DECK_SECTIONS:
 
@@ -1644,16 +2279,19 @@ def add_card_to_deck(
 
     if new_qty <= 0:
 
+        existing_id = deck_card.id if deck_card else None
+
         if deck_card:
 
             db.delete(deck_card)
 
             db.commit()
 
-        return RedirectResponse(
-            url=f"/decks/{deck_id}",
-            status_code=303,
-        )
+        return {
+            "deck_card_id": existing_id,
+            "quantity": 0,
+            "deleted": True,
+        }
 
     if deck_card:
 
@@ -1661,17 +2299,136 @@ def add_card_to_deck(
 
     else:
 
-        db.add(
-            DeckCard(
-                deck_id=deck_id,
-                card_id=card_id,
-                section=section,
-                quantity=new_qty,
-            )
+        deck_card = DeckCard(
+            deck_id=deck_id,
+            card_id=card_id,
+            section=section,
+            quantity=new_qty,
         )
+
+        db.add(deck_card)
 
     db.commit()
 
+    return {
+        "deck_card_id": deck_card.id,
+        "quantity": deck_card.quantity,
+        "deleted": False,
+    }
+
+
+def deck_section_counts(
+    db: Session,
+    deck_id: int,
+):
+    rows = (
+        db.query(
+            DeckCard.section,
+            func.coalesce(func.sum(DeckCard.quantity), 0),
+        )
+        .filter(DeckCard.deck_id == deck_id)
+        .group_by(DeckCard.section)
+        .all()
+    )
+
+    counts = {section: 0 for section in DECK_SECTIONS}
+
+    for section, total in rows:
+
+        counts[section] = total
+
+    return counts
+
+
+def deck_section_costs(
+    db: Session,
+    deck_id: int,
+):
+    price_expression = func.coalesce(
+        Card.price_usd,
+        Card.price_usd_foil,
+        Card.price_usd_etched,
+        0,
+    )
+
+    rows = (
+        db.query(
+            DeckCard.section,
+            func.coalesce(
+                func.sum(DeckCard.quantity * price_expression),
+                0,
+            ),
+        )
+        .join(Card, Card.id == DeckCard.card_id)
+        .filter(DeckCard.deck_id == deck_id)
+        .group_by(DeckCard.section)
+        .all()
+    )
+
+    costs = {section: Decimal("0.00") for section in DECK_SECTIONS}
+
+    for section, total in rows:
+
+        costs[section] = Decimal(total)
+
+    return costs
+
+
+def get_or_create_deck_by_name(
+    db: Session,
+    name: str,
+):
+    """Find a deck by exact (case-insensitive) name, or create it.
+    Used by bulk-add's "add to deck" option so re-running a bulk add
+    with the same deck name keeps adding to the same deck.
+    """
+
+    name = name.strip()
+
+    if not name:
+
+        return None
+
+    deck = (
+        db.query(Deck)
+        .filter(func.lower(Deck.name) == name.lower())
+        .first()
+    )
+
+    if deck:
+
+        return deck
+
+    deck = Deck(name=name)
+
+    db.add(deck)
+
+    db.commit()
+
+    db.refresh(deck)
+
+    return deck
+
+
+def deck_mutation_response(
+    request: Request,
+    db: Session,
+    deck_id: int,
+    payload: dict,
+):
+    if is_ajax_request(request):
+
+        counts = deck_section_counts(db, deck_id)
+
+        payload["mainboard_count"] = counts["mainboard"]
+        payload["sideboard_count"] = counts["sideboard"]
+
+        costs = deck_section_costs(db, deck_id)
+
+        payload["mainboard_cost"] = float(costs["mainboard"])
+        payload["sideboard_cost"] = float(costs["sideboard"])
+
+        return JSONResponse(payload)
 
     return RedirectResponse(
         url=f"/decks/{deck_id}",
@@ -1679,8 +2436,43 @@ def add_card_to_deck(
     )
 
 
+@app.post("/decks/{deck_id}/cards")
+def add_card_to_deck(
+    request: Request,
+    deck_id: int,
+    card_id: int = Form(...),
+    section: str = Form("mainboard"),
+    quantity: int = Form(1),
+    db: Session = Depends(get_db),
+):
+
+    if section not in DECK_SECTIONS:
+
+        section = "mainboard"
+
+    result = add_card_quantity_to_deck(
+        db,
+        deck_id,
+        card_id,
+        section,
+        quantity,
+    )
+
+    return deck_mutation_response(
+        request,
+        db,
+        deck_id,
+        {
+            "card_id": card_id,
+            "section": section,
+            **result,
+        },
+    )
+
+
 @app.post("/decks/{deck_id}/cards/{deck_card_id}/quantity")
 def update_deck_card_quantity(
+    request: Request,
     deck_id: int,
     deck_card_id: int,
     quantity: int = Form(...),
@@ -1696,6 +2488,9 @@ def update_deck_card_quantity(
         .first()
     )
 
+    deleted = False
+    final_qty = 0
+
     if deck_card:
 
         owned_qty = owned_quantity_for_card(
@@ -1706,23 +2501,34 @@ def update_deck_card_quantity(
 
         if capped_qty <= 0:
 
+            deleted = True
+
             db.delete(deck_card)
 
         else:
 
             deck_card.quantity = capped_qty
 
+            final_qty = capped_qty
+
         db.commit()
 
 
-    return RedirectResponse(
-        url=f"/decks/{deck_id}",
-        status_code=303,
+    return deck_mutation_response(
+        request,
+        db,
+        deck_id,
+        {
+            "deck_card_id": deck_card_id,
+            "quantity": final_qty,
+            "deleted": deleted,
+        },
     )
 
 
 @app.post("/decks/{deck_id}/cards/{deck_card_id}/delete")
 def delete_deck_card(
+    request: Request,
     deck_id: int,
     deck_card_id: int,
     db: Session = Depends(get_db),
@@ -1744,9 +2550,15 @@ def delete_deck_card(
         db.commit()
 
 
-    return RedirectResponse(
-        url=f"/decks/{deck_id}",
-        status_code=303,
+    return deck_mutation_response(
+        request,
+        db,
+        deck_id,
+        {
+            "deck_card_id": deck_card_id,
+            "quantity": 0,
+            "deleted": True,
+        },
     )
 
 
@@ -1826,10 +2638,210 @@ def export_deck_txt(
     )
 
 
+FORGE_SIM_URL = "http://forge-sim:8000/simulate"
+
+FORGE_SIM_TIMEOUT_SECONDS = 330
+
+
+def build_dck_text(deck: Deck):
+    """Build a Forge-format .dck (mainboard only — Forge's headless
+    sim mode just needs two decks to play a match, no sideboard)."""
+
+    mainboard = sorted(
+        (
+            deck_card
+            for deck_card in deck.cards
+            if deck_card.section == "mainboard"
+        ),
+        key=lambda deck_card: deck_card.card.name,
+    )
+
+    lines = [
+        "[metadata]",
+        f"Name={deck.name}",
+        "[Main]",
+    ]
+
+    for deck_card in mainboard:
+
+        lines.append(
+            f"{deck_card.quantity} {deck_card.card.name}"
+            f"|{deck_card.card.set_code}"
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+@app.get("/simulate")
+def simulate_form(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+
+    decks = (
+        db.query(Deck)
+        .order_by(Deck.name)
+        .all()
+    )
+
+    return render_template(
+        request,
+        "simulate.html",
+        {
+            "decks": decks,
+            "result": None,
+        },
+    )
+
+
+@app.post("/simulate/run")
+def simulate_run(
+    request: Request,
+    deck_a_id: int = Form(...),
+    deck_b_id: int = Form(...),
+    games: int = Form(20),
+    db: Session = Depends(get_db),
+):
+
+    decks = (
+        db.query(Deck)
+        .order_by(Deck.name)
+        .all()
+    )
+
+    deck_a = (
+        db.query(Deck)
+        .filter(Deck.id == deck_a_id)
+        .first()
+    )
+
+    deck_b = (
+        db.query(Deck)
+        .filter(Deck.id == deck_b_id)
+        .first()
+    )
+
+    if not deck_a or not deck_b:
+
+        return render_template(
+            request,
+            "simulate.html",
+            {
+                "decks": decks,
+                "result": {
+                    "error": "Pick two decks to simulate.",
+                },
+            },
+        )
+
+
+    payload = {
+        "deck_a_name": deck_a.name,
+        "deck_a_dck": build_dck_text(deck_a),
+        "deck_b_name": deck_b.name,
+        "deck_b_dck": build_dck_text(deck_b),
+        "games": games,
+    }
+
+    try:
+
+        response = requests.post(
+            FORGE_SIM_URL,
+            json=payload,
+            timeout=FORGE_SIM_TIMEOUT_SECONDS,
+        )
+
+        response.raise_for_status()
+
+        result = response.json()
+
+    except requests.exceptions.Timeout:
+
+        result = {
+            "error":
+                "Simulation is taking longer than expected — it may "
+                "still be running (possibly queued behind another "
+                "simulation). Try again in a bit.",
+        }
+
+    except Exception:
+
+        result = {
+            "error":
+                "Simulation service unavailable — "
+                "is the forge-sim container running?",
+        }
+
+
+    result["deck_a_name"] = deck_a.name
+
+    result["deck_b_name"] = deck_b.name
+
+
+    return render_template(
+        request,
+        "simulate.html",
+        {
+            "decks": decks,
+            "result": result,
+            "selected_deck_a_id": deck_a_id,
+            "selected_deck_b_id": deck_b_id,
+            "selected_games": games,
+        },
+    )
+
+
+def is_ajax_request(
+    request: Request,
+):
+    """Our own collection-page JS marks its fetch() calls with this
+    header so these endpoints can respond with JSON instead of a
+    redirect, letting the page update in place without losing filters,
+    sort, or scroll position."""
+
+    return bool(
+        request.headers.get("x-requested-with")
+    )
+
+
+def quantity_update_response(
+    request: Request,
+    inventory: Inventory | None,
+    deleted: bool,
+):
+    if is_ajax_request(request):
+
+        if not inventory or deleted:
+
+            return JSONResponse({
+                "quantity": 0,
+                "deleted": True,
+                "entry_value": 0.0,
+            })
+
+        entry_value = (
+            inventory_price(inventory)
+            * inventory.quantity
+        )
+
+        return JSONResponse({
+            "quantity": inventory.quantity,
+            "deleted": False,
+            "entry_value": float(entry_value),
+        })
+
+    return RedirectResponse(
+        url="/collection",
+        status_code=303,
+    )
+
+
 @app.post(
     "/inventory/{inventory_id}/quantity"
 )
 def update_quantity(
+
+    request: Request,
 
     inventory_id: int,
 
@@ -1851,13 +2863,12 @@ def update_quantity(
 
     if not inventory:
 
-        return RedirectResponse(
-            url="/collection",
-            status_code=303,
-        )
+        return quantity_update_response(request, None, deleted=True)
 
 
-    if quantity <= 0:
+    deleted = quantity <= 0
+
+    if deleted:
 
         db.delete(
             inventory
@@ -1873,16 +2884,15 @@ def update_quantity(
     db.commit()
 
 
-    return RedirectResponse(
-        url="/collection",
-        status_code=303,
-    )
+    return quantity_update_response(request, inventory, deleted)
 
 
 @app.post(
     "/inventory/{inventory_id}/adjust"
 )
 def adjust_quantity(
+
+    request: Request,
 
     inventory_id: int,
 
@@ -1904,16 +2914,15 @@ def adjust_quantity(
 
     if not inventory:
 
-        return RedirectResponse(
-            url="/collection",
-            status_code=303,
-        )
+        return quantity_update_response(request, None, deleted=True)
 
 
     inventory.quantity += amount
 
 
-    if inventory.quantity <= 0:
+    deleted = inventory.quantity <= 0
+
+    if deleted:
 
         db.delete(
             inventory
@@ -1923,10 +2932,7 @@ def adjust_quantity(
     db.commit()
 
 
-    return RedirectResponse(
-        url="/collection",
-        status_code=303,
-    )
+    return quantity_update_response(request, inventory, deleted)
 
 
 @app.post(
@@ -2101,18 +3107,12 @@ def refresh_single_price(
     )
 
 
-@app.post("/refresh-prices")
-def refresh_all_prices(
-
-    db: Session = Depends(get_db),
-
-):
+def refresh_all_card_prices(db: Session):
 
     cards = (
         db.query(Card)
         .all()
     )
-
 
     for card in cards:
 
@@ -2129,10 +3129,132 @@ def refresh_all_prices(
             db.rollback()
 
 
+def compute_collection_totals(db: Session):
+    """Total quantity and total USD value across all inventory —
+    the same math sets_summary uses per-set, just unrolled to a
+    single grand total for value-history snapshots."""
+
+    inventory_entries = (
+        db.query(Inventory)
+        .all()
+    )
+
+    total_cards = sum(
+        entry.quantity for entry in inventory_entries
+    )
+
+    total_value = sum(
+        (
+            inventory_price(entry) * entry.quantity
+            for entry in inventory_entries
+        ),
+        Decimal("0.00"),
+    )
+
+    return total_cards, total_value
+
+
+def record_collection_value_snapshot(db: Session):
+
+    total_cards, total_value = compute_collection_totals(db)
+
+    db.add(
+        CollectionValueSnapshot(
+            total_cards=total_cards,
+            total_value=total_value,
+        )
+    )
+
+    db.commit()
+
+
+def refresh_prices_and_snapshot(db: Session):
+
+    refresh_all_card_prices(db)
+
+    record_collection_value_snapshot(db)
+
+
+@app.post("/refresh-prices")
+def refresh_all_prices(
+
+    db: Session = Depends(get_db),
+
+):
+
+    refresh_prices_and_snapshot(db)
+
     return RedirectResponse(
         url="/collection",
         status_code=303,
     )
+
+
+VALUE_CHART_WIDTH = 700
+
+VALUE_CHART_HEIGHT = 220
+
+VALUE_CHART_PADDING = 30
+
+
+def build_value_history_chart(snapshots):
+    """Turn a time-ordered list of CollectionValueSnapshot rows into
+    SVG polyline points, positioned by actual elapsed time (not just
+    evenly spaced by index)."""
+
+    if len(snapshots) < 2:
+
+        return None
+
+    values = [float(snapshot.total_value) for snapshot in snapshots]
+
+    min_value, max_value = min(values), max(values)
+
+    if min_value == max_value:
+
+        min_value -= 1
+        max_value += 1
+
+    times = [snapshot.captured_at for snapshot in snapshots]
+
+    span_seconds = (
+        (times[-1] - times[0]).total_seconds()
+        or 1
+    )
+
+    plot_width = VALUE_CHART_WIDTH - 2 * VALUE_CHART_PADDING
+
+    plot_height = VALUE_CHART_HEIGHT - 2 * VALUE_CHART_PADDING
+
+    points = []
+
+    for snapshot, value, captured_at in zip(snapshots, values, times):
+
+        x = (
+            VALUE_CHART_PADDING
+            + (captured_at - times[0]).total_seconds() / span_seconds * plot_width
+        )
+
+        y = (
+            VALUE_CHART_PADDING
+            + plot_height
+            - (value - min_value) / (max_value - min_value) * plot_height
+        )
+
+        points.append({
+            "x": round(x, 1),
+            "y": round(y, 1),
+            "value": value,
+            "date": captured_at.strftime("%Y-%m-%d"),
+        })
+
+    return {
+        "width": VALUE_CHART_WIDTH,
+        "height": VALUE_CHART_HEIGHT,
+        "points": points,
+        "polyline":
+            " ".join(f"{point['x']},{point['y']}" for point in points),
+    }
 
 
 @app.get("/sets")
@@ -2254,6 +3376,12 @@ def sets_summary(
     )
 
 
+    value_snapshots = (
+        db.query(CollectionValueSnapshot)
+        .order_by(CollectionValueSnapshot.captured_at)
+        .all()
+    )
+
     return render_template(
 
         request,
@@ -2270,6 +3398,9 @@ def sets_summary(
 
             "grand_total_value":
                 grand_total_value,
+
+            "value_history":
+                build_value_history_chart(value_snapshots),
 
         },
     )

@@ -16,6 +16,13 @@
 
     <h2>Results</h2>
 
+    {% if deck_link %}
+    <p class="muted">
+        Added to deck
+        <a href="/decks/{{ deck_link.id }}">{{ deck_link.name }}</a>.
+    </p>
+    {% endif %}
+
     {% for result in results %}
 
     <div class="bulk-result">
@@ -131,6 +138,73 @@
         <hr style="margin: 20px 0;">
 
 
+        <div class="form-grid">
+
+            <div>
+                <label>
+                    Add to Deck (optional)
+                </label>
+
+                <select
+                    name="deck_choice"
+                    id="deck-choice"
+                    onchange="toggleNewDeckName()"
+                >
+                    <option value="">
+                        Don't add to a deck
+                    </option>
+
+                    <option value="__new__">
+                        + New deck...
+                    </option>
+
+                    {% for deck in decks %}
+                    <option value="{{ deck.id }}">
+                        {{ deck.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div id="new-deck-name-wrap" style="display: none;">
+                <label>
+                    New Deck Name
+                </label>
+
+                <input
+                    type="text"
+                    name="new_deck_name"
+                    id="new-deck-name"
+                    placeholder="e.g. Sliver Swarm Precon"
+                >
+            </div>
+
+            <div>
+                <label>
+                    Deck Section
+                </label>
+
+                <select name="deck_section">
+                    <option value="mainboard">
+                        Mainboard
+                    </option>
+                    <option value="sideboard">
+                        Sideboard
+                    </option>
+                </select>
+            </div>
+
+        </div>
+
+        <p class="muted" style="margin-top: 10px;">
+            If set, every card added below is also added to this deck
+            (in addition to your collection) using the same quantities.
+        </p>
+
+
+        <hr style="margin: 20px 0;">
+
+
         <label>
             Cards
         </label>
@@ -228,6 +302,17 @@
 
 
 <script>
+    function toggleNewDeckName() {
+        const choice = document.getElementById("deck-choice").value;
+        const wrap = document.getElementById("new-deck-name-wrap");
+        const input = document.getElementById("new-deck-name");
+
+        const isNew = choice === "__new__";
+
+        wrap.style.display = isNew ? "" : "none";
+        input.required = isNew;
+    }
+
     function addBulkRow() {
         const rows = document.getElementById("bulk-rows");
 

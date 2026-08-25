@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Simulate</h1>
+
+<p class="muted">
+    Run AI-vs-AI games between two of your decks using
+    <a href="https://github.com/Card-Forge/forge" target="_blank" rel="noopener">Forge</a>,
+    an open-source rules engine. This measures whether a deck functions
+    on its own — Forge's built-in AI is not a strong player, so treat
+    win rates as a rough signal, not a competitive ranking.
+</p>
+
+
+{% if decks|length < 2 %}
+
+<div class="card">
+    You need at least two decks to run a simulation —
+    <a href="/decks">build or import one</a> first.
+</div>
+
+{% else %}
+
+<div class="card" style="margin-bottom: 25px;">
+
+    <form
+        method="post"
+        action="/simulate/run"
+    >
+
+        <div class="form-grid">
+
+            <div>
+                <label>Deck A</label>
+                <select name="deck_a_id" required>
+                    {% for deck in decks %}
+                    <option
+                        value="{{ deck.id }}"
+                        {% if selected_deck_a_id == deck.id %}selected{% endif %}
+                    >
+                        {{ deck.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label>Deck B</label>
+                <select name="deck_b_id" required>
+                    {% for deck in decks %}
+                    <option
+                        value="{{ deck.id }}"
+                        {% if selected_deck_b_id == deck.id %}selected{% endif %}
+                    >
+                        {{ deck.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label>Games</label>
+                <input
+                    class="small-input"
+                    type="number"
+                    name="games"
+                    min="1"
+                    max="200"
+                    value="{{ selected_games or 20 }}"
+                >
+            </div>
+
+            <div>
+                <button type="submit" class="positive">
+                    Run Simulation
+                </button>
+            </div>
+
+        </div>
+
+        <p class="muted" style="font-size: 12px; margin-top: 10px;">
+            Games are split across 8 parallel Forge processes, so larger
+            game counts don't take proportionally longer — but this can
+            still take a minute or two.
+        </p>
+
+    </form>
+
+</div>
+
+<div
+    id="simulate-progress"
+    class="card"
+    style="display: none; margin-bottom: 25px;"
+>
+    <div style="display: flex; align-items: center; gap: 12px;">
+        <div class="spinner"></div>
+        <div>
+            Running simulation&hellip; this can take a minute or two.
+            <div class="muted" style="font-size: 12px;">
+                Feel free to leave this tab open — it'll update when it's done.
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .spinner {
+        width: 22px;
+        height: 22px;
+        flex-shrink: 0;
+        border: 3px solid #ddd;
+        border-top-color: #4a6fa5;
+        border-radius: 50%;
+        animation: simulate-spin 0.8s linear infinite;
+    }
+
+    @keyframes simulate-spin {
+        to { transform: rotate(360deg); }
+    }
+</style>
+
+<script>
+    (function () {
+        var form = document.querySelector('form[action="/simulate/run"]');
+        var progress = document.getElementById("simulate-progress");
+
+        if (!form || !progress) {
+            return;
+        }
+
+        form.addEventListener("submit", function () {
+            progress.style.display = "block";
+
+            var button = form.querySelector('button[type="submit"]');
+
+            if (button) {
+                button.disabled = true;
+                button.textContent = "Running…";
+            }
+        });
+    })();
+</script>
+
+{% endif %}
+
+
+{% if result %}
+
+{% if result.error %}
+
+<div class="card">
+    <p class="danger-text">{{ result.error }}</p>
+
+    {% if result.raw_tail %}
+    <pre style="white-space: pre-wrap; font-size: 12px; margin-top: 10px;">{{ result.raw_tail }}</pre>
+    {% endif %}
+</div>
+
+{% elif not result.games_played %}
+
+<div class="card">
+    <p class="danger-text">Simulation returned no completed games.</p>
+
+    {% if result.raw_tail %}
+    <pre style="white-space: pre-wrap; font-size: 12px; margin-top: 10px;">{{ result.raw_tail }}</pre>
+    {% endif %}
+</div>
+
+{% else %}
+
+<div class="card">
+
+    <h2>Results</h2>
+
+    {% if result.note %}
+    <p class="muted" style="font-size: 13px;">&#9888; {{ result.note }}</p>
+    {% endif %}
+
+    <div class="stats">
+
+        <div class="stat">
+            <div class="muted">{{ result.deck_a_name }}</div>
+            <div class="stat-number">{{ result.deck_a_wins }}</div>
+            <div class="muted">
+                {{ "%.0f"|format(100 * result.deck_a_wins / result.games_played) }}% win rate
+            </div>
+        </div>
+
+        <div class="stat">
+            <div class="muted">{{ result.deck_b_name }}</div>
+            <div class="stat-number">{{ result.deck_b_wins }}</div>
+            <div class="muted">
+                {{ "%.0f"|format(100 * result.deck_b_wins / result.games_played) }}% win rate
+            </div>
+        </div>
+
+        <div class="stat">
+            <div class="muted">Games Played</div>
+            <div class="stat-number">{{ result.games_played }}</div>
+        </div>
+
+        {% if result.avg_game_ms %}
+        <div class="stat">
+            <div class="muted">Avg Game Length</div>
+            <div class="stat-number">{{ "%.1f"|format(result.avg_game_ms / 1000) }}s</div>
+        </div>
+        {% endif %}
+
+    </div>
+
+    {% if result.raw_tail %}
+    <details style="margin-top: 15px;">
+        <summary>Show raw output</summary>
+        <pre style="white-space: pre-wrap; font-size: 12px; margin-top: 10px;">{{ result.raw_tail }}</pre>
+    </details>
+    {% endif %}
+
+</div>
+
+{% endif %}
+
+{% endif %}
+
+{% endblock %}

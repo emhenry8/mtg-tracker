@@ -119,4 +119,46 @@
 
 </div>
 
+
+<div class="card" style="margin-top: 25px;">
+
+    <h2>Collection Value Over Time</h2>
+
+    {% if value_history %}
+
+    <svg
+        viewBox="0 0 {{ value_history.width }} {{ value_history.height }}"
+        style="width: 100%; height: auto; max-height: 260px;"
+    >
+        <polyline
+            points="{{ value_history.polyline }}"
+            fill="none"
+            stroke="#4a6fa5"
+            stroke-width="2"
+        />
+
+        {% for point in value_history.points %}
+        <circle cx="{{ point.x }}" cy="{{ point.y }}" r="3" fill="#4a6fa5">
+            <title>{{ point.date }}: ${{ "%.2f"|format(point.value) }}</title>
+        </circle>
+        {% endfor %}
+    </svg>
+
+    <div class="muted" style="font-size: 12px; display: flex; justify-content: space-between; margin-top: 8px;">
+        <span>{{ value_history.points[0].date }}: ${{ "%.2f"|format(value_history.points[0].value) }}</span>
+        <span>{{ value_history.points[-1].date }}: ${{ "%.2f"|format(value_history.points[-1].value) }}</span>
+    </div>
+
+    {% else %}
+
+    <p class="muted">
+        Not enough history yet &mdash; a snapshot is taken automatically about once a
+        week, or any time you click "Refresh Prices" on the Collection page. Check
+        back after a couple of refreshes.
+    </p>
+
+    {% endif %}
+
+</div>
+
 {% endblock %}

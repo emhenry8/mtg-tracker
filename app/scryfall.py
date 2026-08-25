@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -159,6 +160,15 @@ def extract_card_data(
                 )
             ),
 
+        "produced_mana":
+            ",".join(
+                data.get(
+                    "produced_mana",
+                    [],
+                )
+                or []
+            ),
+
         "image_url":
             image_uris.get("normal")
             or image_uris.get("large"),
@@ -189,6 +199,14 @@ def extract_card_data(
 
         "price_updated_at":
             datetime.utcnow(),
+
+        "legalities":
+            json.dumps(
+                data.get(
+                    "legalities",
+                    {},
+                )
+            ),
 
     }
 

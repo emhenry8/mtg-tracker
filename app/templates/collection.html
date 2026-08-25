@@ -12,7 +12,11 @@
             Cards Shown
         </div>
 
-        <div class="stat-number">
+        <div
+            class="stat-number"
+            id="stat-total-cards"
+            data-value="{{ total_cards }}"
+        >
             {{ total_cards }}
         </div>
 
@@ -24,7 +28,11 @@
             Current Value
         </div>
 
-        <div class="stat-number">
+        <div
+            class="stat-number"
+            id="stat-total-value"
+            data-value="{{ total_value }}"
+        >
             ${{ "%.2f"|format(total_value) }}
         </div>
 
@@ -494,7 +502,11 @@
 
     {% set unit_price = inventory_price(row) %}
 
-    <tr>
+    <tr
+        data-row
+        data-unit-price="{{ unit_price }}"
+        data-quantity="{{ row.quantity }}"
+    >
         <td>{{ row.card.name }}</td>
 
         <td class="muted">
@@ -517,16 +529,31 @@
                 <form
                     method="post"
                     action="/inventory/{{ row.id }}/adjust"
+                    class="js-qty-adjust"
                 >
                     <input type="hidden" name="amount" value="-1">
                     <button type="submit">−</button>
                 </form>
 
-                <strong>{{ row.quantity }}</strong>
+                <form
+                    method="post"
+                    action="/inventory/{{ row.id }}/quantity"
+                    class="js-qty-set"
+                >
+                    <input
+                        class="qty-input"
+                        type="number"
+                        name="quantity"
+                        min="0"
+                        value="{{ row.quantity }}"
+                        style="width: 55px;"
+                    >
+                </form>
 
                 <form
                     method="post"
                     action="/inventory/{{ row.id }}/adjust"
+                    class="js-qty-adjust"
                 >
                     <input type="hidden" name="amount" value="1">
                     <button type="submit" class="positive">+</button>
@@ -538,7 +565,7 @@
 
         <td>${{ "%.2f"|format(unit_price) }}</td>
 
-        <td><strong>${{ "%.2f"|format(unit_price * row.quantity) }}</strong></td>
+        <td><strong class="entry-value">${{ "%.2f"|format(unit_price * row.quantity) }}</strong></td>
 
         <td class="muted" style="font-size: 12px;">
             {{ row.created_at.strftime("%Y-%m-%d %H:%M") }}
@@ -579,7 +606,12 @@
 
 {% set unit_price = inventory_price(row) %}
 
-<div class="gallery-card">
+<div
+    class="gallery-card"
+    data-row
+    data-unit-price="{{ unit_price }}"
+    data-quantity="{{ row.quantity }}"
+>
 
     {% if row.card.image_url %}
 
@@ -619,16 +651,31 @@
                 <form
                     method="post"
                     action="/inventory/{{ row.id }}/adjust"
+                    class="js-qty-adjust"
                 >
                     <input type="hidden" name="amount" value="-1">
                     <button type="submit">−</button>
                 </form>
 
-                <strong>{{ row.quantity }}</strong>
+                <form
+                    method="post"
+                    action="/inventory/{{ row.id }}/quantity"
+                    class="js-qty-set"
+                >
+                    <input
+                        class="qty-input"
+                        type="number"
+                        name="quantity"
+                        min="0"
+                        value="{{ row.quantity }}"
+                        style="width: 48px;"
+                    >
+                </form>
 
                 <form
                     method="post"
                     action="/inventory/{{ row.id }}/adjust"
+                    class="js-qty-adjust"
                 >
                     <input type="hidden" name="amount" value="1">
                     <button type="submit" class="positive">+</button>
@@ -653,7 +700,14 @@
 
 {% for row in inventory_rows %}
 
-<div class="card">
+{% set unit_price = inventory_price(row) %}
+
+<div
+    class="card"
+    data-row
+    data-unit-price="{{ unit_price }}"
+    data-quantity="{{ row.quantity }}"
+>
 
     <h2>
         {{ row.card.name }}
@@ -693,9 +747,6 @@
     </div>
 
 
-    {% set unit_price = inventory_price(row) %}
-
-
     <div style="margin-top: 15px;">
 
         <div class="muted">
@@ -715,7 +766,7 @@
             Entry Value
         </div>
 
-        <strong>
+        <strong class="entry-value">
             ${{ "%.2f"|format(unit_price * row.quantity) }}
         </strong>
 
@@ -727,6 +778,7 @@
         <form
             method="post"
             action="/inventory/{{ row.id }}/adjust"
+            class="js-qty-adjust"
         >
 
             <input
@@ -742,7 +794,7 @@
         </form>
 
 
-        <strong>
+        <strong class="qty-value">
             {{ row.quantity }}
         </strong>
 
@@ -750,6 +802,7 @@
         <form
             method="post"
             action="/inventory/{{ row.id }}/adjust"
+            class="js-qty-adjust"
         >
 
             <input
@@ -774,6 +827,7 @@
         method="post"
         action="/inventory/{{ row.id }}/quantity"
         style="margin-top: 12px;"
+        class="js-qty-set"
     >
 
         <label>
@@ -781,7 +835,7 @@
         </label>
 
         <input
-            class="small-input"
+            class="small-input qty-input"
             type="number"
             name="quantity"
             min="0"
@@ -945,5 +999,127 @@
 </div>
 
 {% endif %}
+
+
+<script>
+    (function () {
+
+        var statCardsEl = document.getElementById("stat-total-cards");
+        var statValueEl = document.getElementById("stat-total-value");
+
+        var statCards = statCardsEl
+            ? parseFloat(statCardsEl.dataset.value)
+            : 0;
+
+        var statValue = statValueEl
+            ? parseFloat(statValueEl.dataset.value)
+            : 0;
+
+        function updateStats(deltaQty, deltaValue) {
+
+            statCards += deltaQty;
+            statValue += deltaValue;
+
+            if (statCardsEl) {
+                statCardsEl.textContent = statCards;
+            }
+
+            if (statValueEl) {
+                statValueEl.textContent = "$" + statValue.toFixed(2);
+            }
+        }
+
+        function applyRowUpdate(row, data, oldQty, unitPrice) {
+
+            updateStats(
+                data.quantity - oldQty,
+                data.entry_value - (unitPrice * oldQty)
+            );
+
+            if (data.deleted) {
+                row.style.transition = "opacity 0.15s";
+                row.style.opacity = "0";
+                setTimeout(function () {
+                    row.remove();
+                }, 150);
+                return;
+            }
+
+            row.dataset.quantity = data.quantity;
+
+            row.querySelectorAll(".qty-value").forEach(function (el) {
+                el.textContent = data.quantity;
+            });
+
+            row.querySelectorAll(".qty-input").forEach(function (el) {
+                el.value = data.quantity;
+            });
+
+            row.querySelectorAll(".entry-value").forEach(function (el) {
+                el.textContent = "$" + data.entry_value.toFixed(2);
+            });
+        }
+
+        document.addEventListener("submit", function (event) {
+
+            var form = event.target;
+
+            var isAdjust = form.classList.contains("js-qty-adjust");
+            var isSet = form.classList.contains("js-qty-set");
+
+            if (!isAdjust && !isSet) {
+                return;
+            }
+
+            event.preventDefault();
+
+            var row = form.closest("[data-row]");
+
+            if (!row) {
+                return;
+            }
+
+            var unitPrice = parseFloat(row.dataset.unitPrice || "0");
+            var oldQty = parseFloat(row.dataset.quantity || "0");
+
+            fetch(form.action, {
+                method: "POST",
+                headers: { "X-Requested-With": "fetch" },
+                body: new FormData(form),
+            })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error("Request failed");
+                    }
+                    return response.json();
+                })
+                .then(function (data) {
+                    applyRowUpdate(row, data, oldQty, unitPrice);
+                })
+                .catch(function () {
+                    alert("Could not update quantity — please try again.");
+                });
+        });
+
+        // Auto-save the free-text quantity box when you tab/click away
+        // after changing it, so you don't have to hit Enter or hunt
+        // for a Save button on every row.
+        document.addEventListener("change", function (event) {
+
+            var input = event.target;
+
+            if (!input.classList.contains("qty-input")) {
+                return;
+            }
+
+            var form = input.closest("form.js-qty-set");
+
+            if (form) {
+                form.requestSubmit();
+            }
+        });
+
+    })();
+</script>
 
 {% endblock %}

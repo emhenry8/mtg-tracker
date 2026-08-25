@@ -94,6 +94,14 @@ class Card(Base):
     )
 
 
+    # Comma-separated colors this card can add to your mana pool (lands,
+    # mana rocks, dorks, etc.) — Scryfall's "produced_mana" field.
+    produced_mana = Column(
+        String(100),
+        nullable=True,
+    )
+
+
     image_url = Column(
         String(1000),
         nullable=True,
@@ -126,6 +134,13 @@ class Card(Base):
 
     price_updated_at = Column(
         DateTime,
+        nullable=True,
+    )
+
+
+    # JSON-encoded Scryfall "legalities" dict, e.g. {"standard": "legal", ...}.
+    legalities = Column(
+        Text,
         nullable=True,
     )
 
@@ -351,4 +366,34 @@ class DeckCard(Base):
             name="uq_deck_card_section",
         ),
 
+    )
+
+
+class CollectionValueSnapshot(Base):
+
+    __tablename__ = "collection_value_snapshots"
+
+
+    id = Column(
+        Integer,
+        primary_key=True,
+    )
+
+
+    captured_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+    total_cards = Column(
+        Integer,
+        nullable=False,
+    )
+
+
+    total_value = Column(
+        Numeric(12, 2),
+        nullable=False,
     )

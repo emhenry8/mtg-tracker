@@ -11,9 +11,38 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
 
+    volumes:
+      - deck_exports:/data/decks
+
     depends_on:
       postgres:
         condition: service_healthy
+
+
+  forge-sim:
+    build: ./forge-sim
+    container_name: mtg-forge-sim
+    restart: unless-stopped
+    init: true
+
+
+  # One-shot tool, not part of the normal stack — the "profiles" entry
+  # keeps `docker compose up` from starting it. Run a bracket with:
+  #   docker compose run --rm bracket
+  bracket:
+    build: ./bracket
+    container_name: mtg-bracket
+    profiles: ["bracket"]
+
+    environment:
+      FORGE_SIM_URL: http://forge-sim:8000/simulate
+      DECKS_DIR: /data/decks
+
+    volumes:
+      - deck_exports:/data/decks:ro
+
+    depends_on:
+      - forge-sim
 
 
   postgres:
@@ -38,3 +67,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+
+volumes:
+  deck_exports:

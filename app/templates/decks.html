@@ -65,7 +65,23 @@
         </button>
     </a>
 
+    <form method="post" action="/decks/export-all">
+        <button class="secondary" type="submit">
+            Export All to Bracket Folder
+        </button>
+    </form>
+
 </div>
+
+
+{% if exported is not none %}
+
+<div class="card" style="margin-bottom: 25px;">
+    Exported {{ exported }} deck{{ "s" if exported != 1 else "" }} (decks with an
+    empty mainboard are skipped) to the shared bracket folder.
+</div>
+
+{% endif %}
 
 
 {% if not deck_rows %}
