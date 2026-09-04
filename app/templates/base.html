@@ -290,8 +290,35 @@
             flex: 2;
         }
 
+        .bulk-row select {
+            flex: 0 0 110px;
+        }
+
+        .bulk-row input.row-set-code {
+            flex: 0 0 90px;
+        }
+
         .bulk-row input[type="number"] {
             width: 90px;
+        }
+
+        .bulk-row-header {
+            font-size: 12px;
+            font-weight: bold;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .bulk-row-header span:first-child {
+            flex: 2;
+        }
+
+        .bulk-row-header span.row-set-code {
+            flex: 0 0 90px;
+        }
+
+        .bulk-row-header span:not(:first-child):not(.row-set-code) {
+            flex: 0 0 110px;
         }
 
         .bulk-result {

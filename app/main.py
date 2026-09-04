@@ -499,11 +499,13 @@ def bulk_add(
 
     set_code: str = Form(...),
 
-    finish: str = Form(...),
-
     treatment: str = Form(...),
 
     collector_number: List[str] = Form(default=[]),
+
+    row_finish: List[str] = Form(default=[]),
+
+    row_set_code: List[str] = Form(default=[]),
 
     quantity: List[str] = Form(default=[]),
 
@@ -537,9 +539,11 @@ def bulk_add(
 
     results = []
 
-    for number, qty_raw in zip(
+    for number, qty_raw, row_finish_val, row_set_code_val in zip(
         collector_number,
         quantity,
+        row_finish,
+        row_set_code,
     ):
 
         number = number.strip()
@@ -547,6 +551,17 @@ def bulk_add(
         if not number:
 
             continue
+
+
+        effective_set_code = (
+            row_set_code_val.strip()
+            or set_code
+        ).upper().strip()
+
+        effective_finish = (
+            row_finish_val.strip().lower()
+            or "normal"
+        )
 
 
         try:
@@ -560,6 +575,8 @@ def bulk_add(
 
             results.append({
                 "collector_number": number,
+                "set_code": effective_set_code,
+                "finish": effective_finish,
                 "success": False,
                 "message": "Quantity must be a number",
             })
@@ -569,16 +586,16 @@ def bulk_add(
 
         success, message = add_card_to_collection(
             db,
-            set_code,
+            effective_set_code,
             number,
-            finish,
+            effective_finish,
             treatment,
             qty,
         )
 
         if success and deck:
 
-            card = get_or_create_card(db, set_code, number)
+            card = get_or_create_card(db, effective_set_code, number)
 
             add_card_quantity_to_deck(
                 db,
@@ -592,6 +609,8 @@ def bulk_add(
 
         results.append({
             "collector_number": number,
+            "set_code": effective_set_code,
+            "finish": effective_finish,
             "quantity": qty,
             "success": success,
             "message": message,
@@ -611,7 +630,6 @@ def bulk_add(
             "results": results,
             "decks": decks,
             "last_set_code": set_code.upper().strip(),
-            "last_finish": finish,
             "last_treatment": treatment,
             "deck_link": deck,
         },
