@@ -1001,6 +1001,8 @@
     </form>
 
 
+    {% if row.card.back_card %}
+
     <form
         method="post"
         action="/inventory/{{ row.id }}/back-face"
@@ -1009,18 +1011,20 @@
 
         <label>
             Back Face
-            {% if row.card.back_card %}
             <span class="muted">
                 (currently {{ row.card.back_card.name }}
                 — {{ row.card.back_card.set_code }}
                 #{{ row.card.back_card.collector_number }})
             </span>
-            {% else %}
-            <span class="muted">
-                (for double-sided tokens Scryfall doesn't link)
-            </span>
-            {% endif %}
         </label>
+
+        <p class="muted" style="font-size: 12px; margin-top: -4px;">
+            Linking merges quantity onto whichever face has the lower
+            collector number — if that's the other face, this row's
+            quantity moves there and this entry disappears from the
+            list (it's still the same physical card, just filed under
+            its partner). Clearing the link does not un-merge.
+        </p>
 
         <div class="form-grid">
 
@@ -1042,17 +1046,69 @@
 
             <div>
                 <button type="submit">
-                    {% if row.card.back_card %}
-                        Update Back Face
-                    {% else %}
-                        Link Back Face
-                    {% endif %}
+                    Update Back Face
                 </button>
             </div>
 
         </div>
 
     </form>
+
+    {% else %}
+
+    <details style="margin-top: 12px;">
+
+        <summary class="muted" style="cursor: pointer; font-size: 13px;">
+            + Link a back face (double-sided tokens only)
+        </summary>
+
+        <form
+            method="post"
+            action="/inventory/{{ row.id }}/back-face"
+            style="margin-top: 10px;"
+        >
+
+            <p class="muted" style="font-size: 12px; margin-top: 0;">
+                For a double-sided token whose other face Scryfall
+                doesn't link on its own. Linking merges quantity onto
+                whichever face has the lower collector number — if
+                that's the other face, this row's quantity moves
+                there and this entry disappears from the list (it's
+                still the same physical card, just filed under its
+                partner).
+            </p>
+
+            <div class="form-grid">
+
+                <div>
+                    <input
+                        type="text"
+                        name="back_set_code"
+                        placeholder="defaults to {{ row.card.set_code }}"
+                    >
+                </div>
+
+                <div>
+                    <input
+                        type="text"
+                        name="back_collector_number"
+                        placeholder="back face collector #"
+                    >
+                </div>
+
+                <div>
+                    <button type="submit">
+                        Link Back Face
+                    </button>
+                </div>
+
+            </div>
+
+        </form>
+
+    </details>
+
+    {% endif %}
 
 
     <div class="actions">

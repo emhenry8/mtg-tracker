@@ -325,16 +325,77 @@ def get_or_create_card(
     return card
 
 
+def _collector_sort_key(collector_number: str):
+    """Numeric collector numbers sort as numbers ("2" < "10"); anything
+    that doesn't parse (variant suffixes like "4a") falls back to a
+    string compare, ordered after every plain-numeric one."""
+
+    try:
+
+        return (0, int(collector_number))
+
+    except (TypeError, ValueError):
+
+        return (1, collector_number or "")
+
+
+def merge_inventory_rows(
+    db: Session,
+    keep_card_id: int,
+    remove_card_id: int,
+):
+    """Fold remove_card_id's Inventory rows into keep_card_id's,
+    summing quantity where both sides already have the same
+    finish/treatment. Used when two Card rows turn out to be the same
+    physical object (a double-sided token's two faces) so it isn't
+    counted twice in collection totals.
+    """
+
+    rows = (
+        db.query(Inventory)
+        .filter(Inventory.card_id == remove_card_id)
+        .all()
+    )
+
+    for row in rows:
+
+        existing = (
+            db.query(Inventory)
+            .filter(
+                Inventory.card_id == keep_card_id,
+                Inventory.finish == row.finish,
+                Inventory.treatment == row.treatment,
+            )
+            .first()
+        )
+
+        if existing:
+
+            existing.quantity += row.quantity
+
+            db.delete(row)
+
+        else:
+
+            row.card_id = keep_card_id
+
+    db.commit()
+
+
 def link_back_face(
     db: Session,
     front_card_id: int,
     back_card_id: int,
 ):
-    """Point front and back Card rows at each other's back_card_id.
+    """Link two Card rows as the front/back of one physical card.
 
-    Mirrored on both rows so "does this card have a linked back face"
-    is a single back_card_id IS NOT NULL check no matter which side
-    of the pair you're looking at.
+    The pair's identity is keyed by the lower collector number (the
+    "primary" side) regardless of which one was passed in as
+    front/back, so linking 2->6 and linking 6->2 land on the same
+    result. Any inventory already recorded against the secondary side
+    is merged onto the primary side and removed from its own, so a
+    linked pair is one row in the collection — not two — no matter
+    which face you happened to add first.
     """
 
     if not back_card_id or front_card_id == back_card_id:
@@ -359,18 +420,34 @@ def link_back_face(
         return
 
 
-    front.back_card_id = back.id
+    primary, secondary = sorted(
+        (front, back),
+        key=lambda card: _collector_sort_key(
+            card.collector_number
+        ),
+    )
 
-    back.back_card_id = front.id
+
+    primary.back_card_id = secondary.id
+
+    secondary.back_card_id = primary.id
 
     db.commit()
+
+
+    merge_inventory_rows(db, primary.id, secondary.id)
 
 
 def unlink_back_face(
     db: Session,
     card_id: int,
 ):
-    """Clear a back-face link from both sides of the pair."""
+    """Clear a back-face link from both sides of the pair.
+
+    Does not attempt to un-merge inventory quantity — there's no way
+    to know how to split it back up — so whatever quantity currently
+    sits on the primary (lower collector number) side stays there.
+    """
 
     card = (
         db.query(Card)
@@ -1400,6 +1477,26 @@ def owned_quantity_for_card(
     db: Session,
     card_id: int,
 ):
+    """Total copies owned of a card. If it's linked as one face of a
+    double-sided token pair, includes the other face's inventory too
+    — normally that's 0 (merge_inventory_rows keeps all of it on the
+    primary side), but checking both sides means deck-building works
+    the same regardless of which face's Card row you're adding.
+    """
+
+    card = (
+        db.query(Card)
+        .filter(Card.id == card_id)
+        .first()
+    )
+
+    card_ids = [card_id]
+
+    if card and card.back_card_id:
+
+        card_ids.append(card.back_card_id)
+
+
     return (
         db.query(
             func.coalesce(
@@ -1410,8 +1507,9 @@ def owned_quantity_for_card(
             )
         )
         .filter(
-            Inventory.card_id ==
-                card_id
+            Inventory.card_id.in_(
+                card_ids
+            )
         )
         .scalar()
     )
