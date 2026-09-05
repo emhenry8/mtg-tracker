@@ -2156,6 +2156,64 @@ def check_mana_base(deck_cards):
     }
 
 
+_TOKEN_COUNT_WORDS = (
+    r"a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+"
+)
+
+_TOKEN_CREATE_RE = re.compile(
+    rf"creates?\s+(?:up to \w+\s+)?(?:X\s+)?"
+    rf"(?:{_TOKEN_COUNT_WORDS})\s+(.+?)\s+tokens?\b",
+    re.IGNORECASE,
+)
+
+
+def find_potential_tokens(deck_cards):
+    """Best-effort scan of each mainboard card's oracle text for
+    token-creation effects, so you know what physical tokens to have
+    on hand before you sit down to play — they don't belong in the
+    60, but you'll want them nearby. Text matching against free-form
+    Oracle wording, so treat this as a helpful checklist, not a
+    guaranteed-complete one.
+    """
+
+    tokens = {}
+
+    for deck_card in deck_cards:
+
+        card = deck_card.card
+
+        if not card.oracle_text:
+
+            continue
+
+        for line in card.oracle_text.splitlines():
+
+            for match in _TOKEN_CREATE_RE.finditer(line):
+
+                description = match.group(1).strip()
+
+                # "a token that's a copy of ..." has no fixed type to
+                # stock up on — skip it.
+                if "copy of" in description.lower():
+
+                    continue
+
+                entry = tokens.setdefault(
+                    description.lower(),
+                    {
+                        "description": description,
+                        "cards": set(),
+                    },
+                )
+
+                entry["cards"].add(card.name)
+
+    return sorted(
+        tokens.values(),
+        key=lambda entry: entry["description"].lower(),
+    )
+
+
 def deck_card_price(card):
     """Best-available USD price for a card at its default (nonfoil)
     finish — DeckCard doesn't track finish, so fall back to whatever
@@ -2410,13 +2468,23 @@ def deck_detail(
         )
 
 
+    def _deck_card_sort_key(deck_card):
+
+        card = deck_card.card
+
+        return (
+            card.set_code or "",
+            _collector_sort_key(card.collector_number),
+            card.name,
+        )
+
     mainboard = sorted(
         (
             deck_card
             for deck_card in deck.cards
             if deck_card.section == "mainboard"
         ),
-        key=lambda deck_card: deck_card.card.name,
+        key=_deck_card_sort_key,
     )
 
     sideboard = sorted(
@@ -2425,7 +2493,7 @@ def deck_detail(
             for deck_card in deck.cards
             if deck_card.section == "sideboard"
         ),
-        key=lambda deck_card: deck_card.card.name,
+        key=_deck_card_sort_key,
     )
 
 
@@ -2511,6 +2579,8 @@ def deck_detail(
                 check_standard_legality(mainboard) if mainboard else None,
             "mana_base":
                 check_mana_base(mainboard) if mainboard else None,
+            "potential_tokens":
+                find_potential_tokens(mainboard) if mainboard else [],
             "owned_by_card_id": owned_by_card_id,
             "browse_cards": browse_cards,
             "set_codes": filter_options["set_codes"],

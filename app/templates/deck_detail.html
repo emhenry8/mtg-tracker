@@ -62,6 +62,29 @@
 </p>
 {% endif %}
 
+{% if potential_tokens %}
+<p class="muted" style="font-size: 13px;">
+    Tokens You'll Need:
+    <details style="display: inline;">
+        <summary style="display: inline; cursor: pointer;">
+            {{ potential_tokens|length }}
+            type{{ "s" if potential_tokens|length != 1 else "" }}
+            (not part of the 60 &mdash; have these on hand when you play)
+        </summary>
+        <ul style="margin: 6px 0 0 0;">
+            {% for token in potential_tokens %}
+            <li>
+                {{ token.description }}
+                <span class="muted">
+                    &mdash; from {{ token.cards|sort|join(", ") }}
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+    </details>
+</p>
+{% endif %}
+
 
 <div class="stats">
 
