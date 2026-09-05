@@ -332,6 +332,24 @@
 
             <div>
 
+                <label>
+                    <input
+                        type="checkbox"
+                        name="has_back"
+                        value="true"
+                        {% if filters.has_back %}
+                            checked
+                        {% endif %}
+                        style="width: auto; margin-right: 6px;"
+                    >
+                    Has linked back face
+                </label>
+
+            </div>
+
+
+            <div>
+
                 <button type="submit">
                     Apply Filters
                 </button>
@@ -507,7 +525,14 @@
         data-unit-price="{{ unit_price }}"
         data-quantity="{{ row.quantity }}"
     >
-        <td>{{ row.card.name }}</td>
+        <td>
+            {{ row.card.name }}
+            {% if row.card.back_card %}
+            <div class="muted back-face-badge">
+                ⇄ {{ row.card.back_card.name }}
+            </div>
+            {% endif %}
+        </td>
 
         <td class="muted">
             {{ row.card.set_code }}
@@ -613,7 +638,48 @@
     data-quantity="{{ row.quantity }}"
 >
 
-    {% if row.card.image_url %}
+    {% if row.card.back_card %}
+
+    <div
+        class="flip-face"
+        data-flip-face
+        data-front-image="{{ row.card.image_url or '' }}"
+        data-front-name="{{ row.card.name }}"
+        data-front-meta="{{ row.card.set_code }} #{{ row.card.collector_number }}"
+        data-back-image="{{ row.card.back_card.image_url or '' }}"
+        data-back-name="{{ row.card.back_card.name }}"
+        data-back-meta="{{ row.card.back_card.set_code }} #{{ row.card.back_card.collector_number }}"
+    >
+
+        {% if row.card.image_url %}
+
+        <img
+            data-flip-image
+            src="{{ row.card.image_url }}"
+            alt="{{ row.card.name }}"
+            loading="lazy"
+        >
+
+        {% else %}
+
+        <div class="gallery-placeholder" data-flip-image>
+            {{ row.card.name }}
+        </div>
+
+        {% endif %}
+
+        <button
+            type="button"
+            class="flip-button"
+            data-flip-button
+            title="Flip to see the other face"
+        >
+            ⇄ Flip
+        </button>
+
+    </div>
+
+    {% elif row.card.image_url %}
 
     <img
         src="{{ row.card.image_url }}"
@@ -632,7 +698,9 @@
     <div class="gallery-body">
 
         <div class="muted" style="font-size: 12px;">
-            {{ row.card.set_code }} #{{ row.card.collector_number }}
+            <span data-flip-setnum>
+                {{ row.card.set_code }} #{{ row.card.collector_number }}
+            </span>
             &middot; {{ row.finish|capitalize }}
         </div>
 
@@ -743,6 +811,12 @@
         <span class="badge">
             {{ row.treatment|capitalize }}
         </span>
+
+        {% if row.card.back_card %}
+        <span class="badge">
+            ⇄ {{ row.card.back_card.name }}
+        </span>
+        {% endif %}
 
     </div>
 
@@ -920,6 +994,60 @@
                     Save Details
                 </button>
 
+            </div>
+
+        </div>
+
+    </form>
+
+
+    <form
+        method="post"
+        action="/inventory/{{ row.id }}/back-face"
+        style="margin-top: 12px;"
+    >
+
+        <label>
+            Back Face
+            {% if row.card.back_card %}
+            <span class="muted">
+                (currently {{ row.card.back_card.name }}
+                — {{ row.card.back_card.set_code }}
+                #{{ row.card.back_card.collector_number }})
+            </span>
+            {% else %}
+            <span class="muted">
+                (for double-sided tokens Scryfall doesn't link)
+            </span>
+            {% endif %}
+        </label>
+
+        <div class="form-grid">
+
+            <div>
+                <input
+                    type="text"
+                    name="back_set_code"
+                    placeholder="defaults to {{ row.card.set_code }}"
+                >
+            </div>
+
+            <div>
+                <input
+                    type="text"
+                    name="back_collector_number"
+                    placeholder="collector # (blank clears link)"
+                >
+            </div>
+
+            <div>
+                <button type="submit">
+                    {% if row.card.back_card %}
+                        Update Back Face
+                    {% else %}
+                        Link Back Face
+                    {% endif %}
+                </button>
             </div>
 
         </div>
@@ -1117,6 +1245,66 @@
             if (form) {
                 form.requestSubmit();
             }
+        });
+
+        // Flip a gallery card between its front and back face image
+        // (purely client-side — both faces' data are already in the
+        // page from data-front-*/data-back-* attributes).
+        document.addEventListener("click", function (event) {
+
+            var button = event.target.closest("[data-flip-button]");
+
+            if (!button) {
+                return;
+            }
+
+            var face = button.closest("[data-flip-face]");
+
+            if (!face) {
+                return;
+            }
+
+            var showingBack = face.dataset.showingBack === "true";
+
+            var imageEl = face.querySelector("[data-flip-image]");
+
+            var setnumEl = face
+                .closest(".gallery-card")
+                .querySelector("[data-flip-setnum]");
+
+            var image = showingBack
+                ? face.dataset.frontImage
+                : face.dataset.backImage;
+
+            var meta = showingBack
+                ? face.dataset.frontMeta
+                : face.dataset.backMeta;
+
+            var name = showingBack
+                ? face.dataset.frontName
+                : face.dataset.backName;
+
+            if (imageEl) {
+
+                if (imageEl.tagName === "IMG") {
+
+                    if (image) {
+                        imageEl.src = image;
+                    }
+
+                    imageEl.alt = name;
+
+                } else {
+
+                    imageEl.textContent = name;
+                }
+            }
+
+            if (setnumEl) {
+                setnumEl.textContent = meta;
+            }
+
+            face.dataset.showingBack = showingBack ? "false" : "true";
         });
 
     })();

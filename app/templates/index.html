@@ -136,6 +136,45 @@
 
         </div>
 
+        <hr style="margin: 16px 0;">
+
+        <p class="muted" style="font-size: 13px;">
+            Double-sided token? Some token pairs (e.g. two
+            single-faced tokens printed back-to-back on one card)
+            aren't linked by Scryfall — enter the other side's set
+            and number here so the app remembers they're one
+            physical card. Leave blank for a normal single-sided
+            card.
+        </p>
+
+        <div class="form-grid">
+
+            <div>
+                <label>
+                    Back Face Set Code
+                </label>
+
+                <input
+                    type="text"
+                    name="back_set_code"
+                    placeholder="defaults to Set Code above"
+                >
+            </div>
+
+            <div>
+                <label>
+                    Back Face Collector Number
+                </label>
+
+                <input
+                    type="text"
+                    name="back_collector_number"
+                    placeholder="optional"
+                >
+            </div>
+
+        </div>
+
     </form>
 
 </div>

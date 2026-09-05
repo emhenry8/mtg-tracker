@@ -34,9 +34,13 @@ from sqlalchemy import (
     case,
     func,
     nullslast,
+    or_,
 )
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import (
+    aliased,
+    Session,
+)
 
 from .database import get_db, SessionLocal
 
@@ -321,6 +325,79 @@ def get_or_create_card(
     return card
 
 
+def link_back_face(
+    db: Session,
+    front_card_id: int,
+    back_card_id: int,
+):
+    """Point front and back Card rows at each other's back_card_id.
+
+    Mirrored on both rows so "does this card have a linked back face"
+    is a single back_card_id IS NOT NULL check no matter which side
+    of the pair you're looking at.
+    """
+
+    if not back_card_id or front_card_id == back_card_id:
+
+        return
+
+
+    front = (
+        db.query(Card)
+        .filter(Card.id == front_card_id)
+        .first()
+    )
+
+    back = (
+        db.query(Card)
+        .filter(Card.id == back_card_id)
+        .first()
+    )
+
+    if not front or not back:
+
+        return
+
+
+    front.back_card_id = back.id
+
+    back.back_card_id = front.id
+
+    db.commit()
+
+
+def unlink_back_face(
+    db: Session,
+    card_id: int,
+):
+    """Clear a back-face link from both sides of the pair."""
+
+    card = (
+        db.query(Card)
+        .filter(Card.id == card_id)
+        .first()
+    )
+
+    if not card or not card.back_card_id:
+
+        return
+
+
+    other = (
+        db.query(Card)
+        .filter(Card.id == card.back_card_id)
+        .first()
+    )
+
+    card.back_card_id = None
+
+    if other:
+
+        other.back_card_id = None
+
+    db.commit()
+
+
 def add_card_to_collection(
     db: Session,
     set_code: str,
@@ -445,6 +522,10 @@ def add_card(
 
     quantity: int = Form(...),
 
+    back_set_code: str = Form(""),
+
+    back_collector_number: str = Form(""),
+
     db: Session = Depends(get_db),
 ):
 
@@ -456,6 +537,25 @@ def add_card(
         treatment,
         quantity,
     )
+
+
+    if success and back_collector_number.strip():
+
+        front_card = get_or_create_card(
+            db, set_code, collector_number
+        )
+
+        back_card = get_or_create_card(
+            db,
+            back_set_code.strip() or set_code,
+            back_collector_number,
+        )
+
+        if front_card and back_card:
+
+            link_back_face(
+                db, front_card.id, back_card.id
+            )
 
 
     if not success:
@@ -508,6 +608,8 @@ def bulk_add(
 
     row_set_code: List[str] = Form(default=[]),
 
+    row_back_number: List[str] = Form(default=[]),
+
     quantity: List[str] = Form(default=[]),
 
     deck_choice: str = Form(""),
@@ -540,11 +642,12 @@ def bulk_add(
 
     results = []
 
-    for number, qty_raw, row_finish_val, row_set_code_val in zip(
+    for number, qty_raw, row_finish_val, row_set_code_val, row_back_val in zip(
         collector_number,
         quantity,
         row_finish,
         row_set_code,
+        row_back_number,
     ):
 
         number = number.strip()
@@ -594,9 +697,15 @@ def bulk_add(
             qty,
         )
 
-        if success and deck:
+        card = None
+
+        back_number = row_back_val.strip()
+
+        if success and (deck or back_number):
 
             card = get_or_create_card(db, effective_set_code, number)
+
+        if success and deck:
 
             add_card_quantity_to_deck(
                 db,
@@ -607,6 +716,18 @@ def bulk_add(
             )
 
             message = f"{message} (added to {deck.name})"
+
+        if success and back_number and card:
+
+            back_card = get_or_create_card(
+                db, effective_set_code, back_number
+            )
+
+            if back_card:
+
+                link_back_face(db, card.id, back_card.id)
+
+                message = f"{message} (linked back face #{back_number})"
 
         results.append({
             "collector_number": number,
@@ -646,24 +767,41 @@ def build_collection_query(
     rarity: str = "",
     finish: str = "",
     treatment: str = "",
+    has_back: bool = False,
     sort: str = "name",
     direction: str = "asc",
 ):
     """Build the filtered/sorted Inventory query shared by the
     collection page and the CSV export, so both stay in sync."""
 
+    BackCard = aliased(Card)
+
     query = (
         db.query(Inventory)
         .join(Card)
+        .outerjoin(
+            BackCard,
+            Card.back_card_id == BackCard.id,
+        )
     )
 
 
     if search:
 
+        like = f"%{search.strip()}%"
+
         query = query.filter(
-            Card.name.ilike(
-                f"%{search.strip()}%"
+            or_(
+                Card.name.ilike(like),
+                BackCard.name.ilike(like),
             )
+        )
+
+
+    if has_back:
+
+        query = query.filter(
+            Card.back_card_id.isnot(None)
         )
 
 
@@ -930,6 +1068,8 @@ def collection(
 
     treatment: str = "",
 
+    has_back: bool = False,
+
     view: str = "gallery",
 
     sort: str = "date_added",
@@ -954,6 +1094,7 @@ def collection(
             rarity=rarity,
             finish=finish,
             treatment=treatment,
+            has_back=has_back,
             sort=sort,
             direction=direction,
         )
@@ -1033,6 +1174,9 @@ def collection(
 
                 "treatment":
                     treatment,
+
+                "has_back":
+                    has_back,
 
                 "view":
                     view,
@@ -3044,6 +3188,71 @@ def update_details(
 
 
     db.commit()
+
+
+    return RedirectResponse(
+        url="/collection",
+        status_code=303,
+    )
+
+
+@app.post(
+    "/inventory/{inventory_id}/back-face"
+)
+def update_back_face(
+
+    inventory_id: int,
+
+    back_set_code: str = Form(""),
+
+    back_collector_number: str = Form(""),
+
+    db: Session = Depends(get_db),
+
+):
+    """Attach, change, or clear the linked back-face card for an
+    existing inventory row's card — lets a token added before this
+    feature existed be backfilled without deleting and re-adding it.
+    """
+
+    inventory = (
+        db.query(Inventory)
+        .filter(
+            Inventory.id ==
+                inventory_id
+        )
+        .first()
+    )
+
+    if not inventory:
+
+        return RedirectResponse(
+            url="/collection",
+            status_code=303,
+        )
+
+
+    back_collector_number = back_collector_number.strip()
+
+    if not back_collector_number:
+
+        unlink_back_face(db, inventory.card_id)
+
+        return RedirectResponse(
+            url="/collection",
+            status_code=303,
+        )
+
+
+    back_card = get_or_create_card(
+        db,
+        back_set_code.strip() or inventory.card.set_code,
+        back_collector_number,
+    )
+
+    if back_card:
+
+        link_back_face(db, inventory.card_id, back_card.id)
 
 
     return RedirectResponse(

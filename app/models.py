@@ -145,6 +145,23 @@ class Card(Base):
     )
 
 
+    # Points at the Card that's physically printed on the other side of
+    # this one (e.g. a double-sided token). Scryfall only links faces
+    # together for the rare "double_faced_token" layout — most
+    # back-to-back token pairs (two otherwise-unrelated single-faced
+    # tokens sharing one piece of cardboard) have no API-visible
+    # relationship, so this is set by hand and mirrored on both rows.
+    back_card_id = Column(
+        Integer,
+        ForeignKey(
+            "cards.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+
     created_at = Column(
         DateTime,
         nullable=False,
@@ -164,6 +181,13 @@ class Card(Base):
         "Inventory",
         back_populates="card",
         cascade="all, delete-orphan",
+    )
+
+
+    back_card = relationship(
+        "Card",
+        remote_side=[id],
+        foreign_keys=[back_card_id],
     )
 
 

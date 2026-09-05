@@ -177,12 +177,16 @@
 
         <p class="muted" style="margin-top: -8px;">
             Leave a row's Set Code blank to use the default set code above.
+            For a double-sided token whose other face isn't linked by
+            Scryfall, fill in Back # with that face's collector number
+            (same set).
         </p>
 
         <div class="bulk-row bulk-row-header">
             <span>Card</span>
             <span>Finish</span>
             <span class="row-set-code">Set Code</span>
+            <span class="row-back-number">Back #</span>
             <span>Qty</span>
         </div>
 
@@ -207,6 +211,12 @@
                     placeholder="Default"
                 >
                 <input
+                    type="text"
+                    name="row_back_number"
+                    class="row-back-number"
+                    placeholder="optional"
+                >
+                <input
                     type="number"
                     name="quantity"
                     min="1"
@@ -240,6 +250,12 @@
                     placeholder="Default"
                 >
                 <input
+                    type="text"
+                    name="row_back_number"
+                    class="row-back-number"
+                    placeholder="optional"
+                >
+                <input
                     type="number"
                     name="quantity"
                     min="1"
@@ -270,6 +286,12 @@
                     name="row_set_code"
                     class="row-set-code"
                     placeholder="Default"
+                >
+                <input
+                    type="text"
+                    name="row_back_number"
+                    class="row-back-number"
+                    placeholder="optional"
                 >
                 <input
                     type="number"
@@ -337,6 +359,7 @@
                 <option value="etched">Etched</option>
             </select>
             <input type="text" name="row_set_code" class="row-set-code" placeholder="Default">
+            <input type="text" name="row_back_number" class="row-back-number" placeholder="optional">
             <input type="number" name="quantity" min="1" value="1">
             <button type="button" class="secondary" onclick="this.closest('.bulk-row').remove()">Remove</button>
         `;

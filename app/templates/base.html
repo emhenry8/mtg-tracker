@@ -275,6 +275,31 @@
             padding: 10px;
         }
 
+        .flip-face {
+            position: relative;
+        }
+
+        .flip-button {
+            position: absolute;
+            bottom: 6px;
+            right: 6px;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 999px;
+            border: none;
+            background: rgba(0,0,0,.65);
+            color: white;
+            cursor: pointer;
+        }
+
+        .flip-button:hover {
+            background: rgba(0,0,0,.85);
+        }
+
+        .back-face-badge {
+            font-size: 11px;
+        }
+
         .gallery-body {
             padding: 10px;
         }
@@ -298,6 +323,10 @@
             flex: 0 0 90px;
         }
 
+        .bulk-row input.row-back-number {
+            flex: 0 0 90px;
+        }
+
         .bulk-row input[type="number"] {
             width: 90px;
         }
@@ -313,11 +342,12 @@
             flex: 2;
         }
 
-        .bulk-row-header span.row-set-code {
+        .bulk-row-header span.row-set-code,
+        .bulk-row-header span.row-back-number {
             flex: 0 0 90px;
         }
 
-        .bulk-row-header span:not(:first-child):not(.row-set-code) {
+        .bulk-row-header span:not(:first-child):not(.row-set-code):not(.row-back-number) {
             flex: 0 0 110px;
         }
 
