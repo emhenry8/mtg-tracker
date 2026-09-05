@@ -33,6 +33,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import (
     case,
     func,
+    nullslast,
 )
 
 from sqlalchemy.orm import Session
@@ -796,13 +797,17 @@ def build_collection_query(
     if direction == "desc":
 
         query = query.order_by(
-            order_column.desc()
+            nullslast(order_column.desc())
+            if sort == "price"
+            else order_column.desc()
         )
 
     else:
 
         query = query.order_by(
-            order_column.asc()
+            nullslast(order_column.asc())
+            if sort == "price"
+            else order_column.asc()
         )
 
 
