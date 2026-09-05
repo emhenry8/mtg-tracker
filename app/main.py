@@ -32,7 +32,10 @@ from fastapi.templating import Jinja2Templates
 
 from sqlalchemy import (
     case,
+    cast,
     func,
+    Integer,
+    nullsfirst,
     nullslast,
     or_,
 )
@@ -696,13 +699,27 @@ def add_card(
             db, set_code, collector_number
         )
 
+        effective_back_set_code = (
+            back_set_code.strip() or set_code
+        ).upper().strip()
+
         back_card = get_or_create_card(
             db,
-            back_set_code.strip() or set_code,
+            effective_back_set_code,
             back_collector_number,
         )
 
-        if front_card and back_card:
+        if not back_card:
+
+            success = False
+
+            message = (
+                f"Added the card, but back face "
+                f"{effective_back_set_code} #{back_collector_number} "
+                f"was not found — no link created"
+            )
+
+        elif front_card:
 
             source_row = find_unlinked_inventory_row(
                 db,
@@ -871,6 +888,20 @@ def bulk_add(
 
         back_number = row_back_val.strip()
 
+        back_set_given = row_back_set_val.strip()
+
+        if success and back_set_given and not back_number:
+
+            # A back set code with no back number can't do anything —
+            # almost always means the number landed in the wrong
+            # column. Flag it instead of silently adding a plain,
+            # unlinked quantity as if nothing was asked for.
+            message = (
+                f"{message} (back set '{back_set_given}' given but "
+                f"Back # was blank — no link created; check you put "
+                f"the collector number in Back #, not Back Set)"
+            )
+
         if success and (deck or back_number):
 
             card = get_or_create_card(db, effective_set_code, number)
@@ -890,7 +921,7 @@ def bulk_add(
         if success and back_number and card:
 
             effective_back_set_code = (
-                row_back_set_val.strip()
+                back_set_given
                 or effective_set_code
             ).upper().strip()
 
@@ -898,18 +929,27 @@ def bulk_add(
                 db, effective_back_set_code, back_number
             )
 
-            source_row = find_unlinked_inventory_row(
-                db,
-                card.id,
-                _normalize_finish(effective_finish),
-                _normalize_treatment(treatment),
-            )
+            if not back_card:
 
-            if back_card and source_row:
+                message = (
+                    f"{message} (back face {effective_back_set_code} "
+                    f"#{back_number} not found — no link created)"
+                )
 
-                link_back_face(db, source_row.id, back_card.id)
+            else:
 
-                message = f"{message} (linked back face #{back_number})"
+                source_row = find_unlinked_inventory_row(
+                    db,
+                    card.id,
+                    _normalize_finish(effective_finish),
+                    _normalize_treatment(treatment),
+                )
+
+                if source_row:
+
+                    link_back_face(db, source_row.id, back_card.id)
+
+                    message = f"{message} (linked back face #{back_number})"
 
         results.append({
             "collector_number": number,
@@ -1133,9 +1173,24 @@ def build_collection_query(
 
     if sort == "set":
 
+        # A front card linked to more than one distinct back face
+        # gets one row per pairing, so break ties within the same
+        # (set, front number) by back-face number — numerically,
+        # since collector numbers are strings ("10" would otherwise
+        # sort before "2") — unpaired rows first, then each pairing
+        # in ascending back-number order.
+        back_number_numeric = case(
+            (
+                BackCard.collector_number.op("~")(r"^\d+$"),
+                cast(BackCard.collector_number, Integer),
+            ),
+            else_=None,
+        )
+
         query = query.order_by(
             Card.set_code.asc(),
             Card.collector_number.asc(),
+            nullsfirst(back_number_numeric.asc()),
         )
 
 
