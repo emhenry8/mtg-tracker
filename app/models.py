@@ -3,12 +3,14 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 
 from sqlalchemy.orm import relationship
@@ -145,23 +147,6 @@ class Card(Base):
     )
 
 
-    # Points at the Card that's physically printed on the other side of
-    # this one (e.g. a double-sided token). Scryfall only links faces
-    # together for the rare "double_faced_token" layout — most
-    # back-to-back token pairs (two otherwise-unrelated single-faced
-    # tokens sharing one piece of cardboard) have no API-visible
-    # relationship, so this is set by hand and mirrored on both rows.
-    back_card_id = Column(
-        Integer,
-        ForeignKey(
-            "cards.id",
-            ondelete="SET NULL",
-        ),
-        nullable=True,
-        index=True,
-    )
-
-
     created_at = Column(
         DateTime,
         nullable=False,
@@ -181,13 +166,7 @@ class Card(Base):
         "Inventory",
         back_populates="card",
         cascade="all, delete-orphan",
-    )
-
-
-    back_card = relationship(
-        "Card",
-        remote_side=[id],
-        foreign_keys=[back_card_id],
+        foreign_keys="Inventory.card_id",
     )
 
 
@@ -245,6 +224,29 @@ class Inventory(Base):
     )
 
 
+    # Points at the Card physically printed on the other side of this
+    # specific batch of copies (e.g. a double-sided token's back
+    # face). This lives on Inventory rather than Card because the
+    # same card number can legitimately pair with different backs
+    # across different physical print runs (WotC reuses generic
+    # filler tokens — "Human," "Zombie," "Villain," etc. — as the back
+    # of many unrelated front designs across different products), so
+    # pairing is a property of a specific pile of physical cards, not
+    # of the card's catalog identity. Scryfall only links faces
+    # together for the rare "double_faced_token" layout; every other
+    # back-to-back token pair has no API-visible relationship, so this
+    # is set by hand.
+    back_card_id = Column(
+        Integer,
+        ForeignKey(
+            "cards.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+
     created_at = Column(
         DateTime,
         nullable=False,
@@ -263,16 +265,41 @@ class Inventory(Base):
     card = relationship(
         "Card",
         back_populates="inventory_entries",
+        foreign_keys=[card_id],
+    )
+
+
+    back_card = relationship(
+        "Card",
+        foreign_keys=[back_card_id],
     )
 
 
     __table_args__ = (
 
-        UniqueConstraint(
+        # One row per (card, finish, treatment) among *unlinked*
+        # batches (back_card_id IS NULL) — same rule as always for a
+        # plain card or a token nobody's paired yet.
+        Index(
+            "uq_inventory_unlinked",
             "card_id",
             "finish",
             "treatment",
-            name="uq_inventory_card_finish_treatment",
+            unique=True,
+            postgresql_where=text("back_card_id IS NULL"),
+        ),
+
+        # One row per (card, finish, treatment, back_card) among
+        # *linked* batches — lets the same card number carry separate
+        # rows for each distinct back it's actually been paired with.
+        Index(
+            "uq_inventory_linked",
+            "card_id",
+            "finish",
+            "treatment",
+            "back_card_id",
+            unique=True,
+            postgresql_where=text("back_card_id IS NOT NULL"),
         ),
 
     )

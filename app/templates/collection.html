@@ -527,9 +527,9 @@
     >
         <td>
             {{ row.card.name }}
-            {% if row.card.back_card %}
+            {% if row.back_card %}
             <div class="muted back-face-badge">
-                ⇄ {{ row.card.back_card.name }}
+                ⇄ {{ row.back_card.name }}
             </div>
             {% endif %}
         </td>
@@ -638,7 +638,7 @@
     data-quantity="{{ row.quantity }}"
 >
 
-    {% if row.card.back_card %}
+    {% if row.back_card %}
 
     <div
         class="flip-face"
@@ -646,9 +646,9 @@
         data-front-image="{{ row.card.image_url or '' }}"
         data-front-name="{{ row.card.name }}"
         data-front-meta="{{ row.card.set_code }} #{{ row.card.collector_number }}"
-        data-back-image="{{ row.card.back_card.image_url or '' }}"
-        data-back-name="{{ row.card.back_card.name }}"
-        data-back-meta="{{ row.card.back_card.set_code }} #{{ row.card.back_card.collector_number }}"
+        data-back-image="{{ row.back_card.image_url or '' }}"
+        data-back-name="{{ row.back_card.name }}"
+        data-back-meta="{{ row.back_card.set_code }} #{{ row.back_card.collector_number }}"
     >
 
         {% if row.card.image_url %}
@@ -812,9 +812,9 @@
             {{ row.treatment|capitalize }}
         </span>
 
-        {% if row.card.back_card %}
+        {% if row.back_card %}
         <span class="badge">
-            ⇄ {{ row.card.back_card.name }}
+            ⇄ {{ row.back_card.name }}
         </span>
         {% endif %}
 
@@ -1001,7 +1001,7 @@
     </form>
 
 
-    {% if row.card.back_card %}
+    {% if row.back_card %}
 
     <form
         method="post"
@@ -1012,9 +1012,9 @@
         <label>
             Back Face
             <span class="muted">
-                (currently {{ row.card.back_card.name }}
-                — {{ row.card.back_card.set_code }}
-                #{{ row.card.back_card.collector_number }})
+                (currently {{ row.back_card.name }}
+                — {{ row.back_card.set_code }}
+                #{{ row.back_card.collector_number }})
             </span>
         </label>
 

@@ -339,140 +339,235 @@ def _collector_sort_key(collector_number: str):
         return (1, collector_number or "")
 
 
-def merge_inventory_rows(
-    db: Session,
-    keep_card_id: int,
-    remove_card_id: int,
-):
-    """Fold remove_card_id's Inventory rows into keep_card_id's,
-    summing quantity where both sides already have the same
-    finish/treatment. Used when two Card rows turn out to be the same
-    physical object (a double-sided token's two faces) so it isn't
-    counted twice in collection totals.
-    """
-
-    rows = (
-        db.query(Inventory)
-        .filter(Inventory.card_id == remove_card_id)
-        .all()
-    )
-
-    for row in rows:
-
-        existing = (
-            db.query(Inventory)
-            .filter(
-                Inventory.card_id == keep_card_id,
-                Inventory.finish == row.finish,
-                Inventory.treatment == row.treatment,
-            )
-            .first()
-        )
-
-        if existing:
-
-            existing.quantity += row.quantity
-
-            db.delete(row)
-
-        else:
-
-            row.card_id = keep_card_id
-
-    db.commit()
-
-
 def link_back_face(
     db: Session,
-    front_card_id: int,
-    back_card_id: int,
+    inventory_id: int,
+    other_card_id: int,
 ):
-    """Link two Card rows as the front/back of one physical card.
+    """Link a specific batch of inventory to a back-face card.
 
-    The pair's identity is keyed by the lower collector number (the
-    "primary" side) regardless of which one was passed in as
-    front/back, so linking 2->6 and linking 6->2 land on the same
-    result. Any inventory already recorded against the secondary side
-    is merged onto the primary side and removed from its own, so a
-    linked pair is one row in the collection — not two — no matter
-    which face you happened to add first.
+    Pairing lives on the Inventory row, not the Card, because the same
+    card number can legitimately pair with different backs across
+    different physical print runs (WotC reuses generic filler tokens
+    as the back of many unrelated front designs). The pair's quantity
+    always ends up on one row, keyed by the lower collector number
+    (the "primary" side) regardless of which one was passed in as
+    front/back — linking 2->6 and linking 6->2 land on the same row.
+
+    Any inventory already sitting unlinked on either side (same
+    finish/treatment) is folded in too, on the assumption that an
+    unlinked batch is unattributed and fair game the first time a
+    specific pairing is established for it. A batch already linked to
+    a *different* partner is left alone — that's a distinct, already-
+    known physical pairing and must never be merged into this one.
     """
 
-    if not back_card_id or front_card_id == back_card_id:
+    source = (
+        db.query(Inventory)
+        .filter(Inventory.id == inventory_id)
+        .first()
+    )
+
+    if not source:
 
         return
 
 
-    front = (
+    other_card = (
         db.query(Card)
-        .filter(Card.id == front_card_id)
+        .filter(Card.id == other_card_id)
         .first()
     )
 
-    back = (
-        db.query(Card)
-        .filter(Card.id == back_card_id)
-        .first()
-    )
-
-    if not front or not back:
+    if not other_card or other_card.id == source.card_id:
 
         return
 
 
     primary, secondary = sorted(
-        (front, back),
+        (source.card, other_card),
         key=lambda card: _collector_sort_key(
             card.collector_number
         ),
     )
 
+    finish = source.finish
 
-    primary.back_card_id = secondary.id
+    treatment = source.treatment
 
-    secondary.back_card_id = primary.id
+
+    existing_linked = (
+        db.query(Inventory)
+        .filter(
+            Inventory.card_id == primary.id,
+            Inventory.back_card_id == secondary.id,
+            Inventory.finish == finish,
+            Inventory.treatment == treatment,
+            Inventory.id != source.id,
+        )
+        .first()
+    )
+
+    primary_unlinked = (
+        db.query(Inventory)
+        .filter(
+            Inventory.card_id == primary.id,
+            Inventory.back_card_id.is_(None),
+            Inventory.finish == finish,
+            Inventory.treatment == treatment,
+            Inventory.id != source.id,
+        )
+        .first()
+    )
+
+    secondary_unlinked = (
+        db.query(Inventory)
+        .filter(
+            Inventory.card_id == secondary.id,
+            Inventory.back_card_id.is_(None),
+            Inventory.finish == finish,
+            Inventory.treatment == treatment,
+            Inventory.id != source.id,
+        )
+        .first()
+    )
+
+    extra_rows = [
+        row
+        for row in (
+            existing_linked, primary_unlinked, secondary_unlinked
+        )
+        if row is not None
+    ]
+
+    total_quantity = source.quantity + sum(
+        row.quantity for row in extra_rows
+    )
+
+
+    keeper = existing_linked or (
+        source if source.card_id == primary.id else None
+    )
+
+    rows_to_delete = [
+        row
+        for row in ([source] + extra_rows)
+        if row is not keeper
+    ]
+
+    for row in rows_to_delete:
+
+        db.delete(row)
+
+    db.flush()
+
+
+    if keeper is None:
+
+        keeper = Inventory(
+            card_id=primary.id,
+            back_card_id=secondary.id,
+            finish=finish,
+            treatment=treatment,
+            quantity=total_quantity,
+        )
+
+        db.add(keeper)
+
+    else:
+
+        keeper.card_id = primary.id
+
+        keeper.back_card_id = secondary.id
+
+        keeper.quantity = total_quantity
+
 
     db.commit()
-
-
-    merge_inventory_rows(db, primary.id, secondary.id)
 
 
 def unlink_back_face(
     db: Session,
-    card_id: int,
+    inventory_id: int,
 ):
-    """Clear a back-face link from both sides of the pair.
+    """Clear the back-face link on one specific inventory row.
 
-    Does not attempt to un-merge inventory quantity — there's no way
-    to know how to split it back up — so whatever quantity currently
-    sits on the primary (lower collector number) side stays there.
+    Does not attempt to un-merge quantity that was folded in when the
+    link was created — there's no way to know how to split it back
+    up — so whatever quantity currently sits on this row stays here.
+    If unlinking would collide with another already-unlinked row for
+    the same card/finish/treatment, folds into that row instead of
+    creating a duplicate.
     """
 
-    card = (
-        db.query(Card)
-        .filter(Card.id == card_id)
+    row = (
+        db.query(Inventory)
+        .filter(Inventory.id == inventory_id)
         .first()
     )
 
-    if not card or not card.back_card_id:
+    if not row or not row.back_card_id:
 
         return
 
 
-    other = (
-        db.query(Card)
-        .filter(Card.id == card.back_card_id)
+    existing_unlinked = (
+        db.query(Inventory)
+        .filter(
+            Inventory.card_id == row.card_id,
+            Inventory.back_card_id.is_(None),
+            Inventory.finish == row.finish,
+            Inventory.treatment == row.treatment,
+            Inventory.id != row.id,
+        )
         .first()
     )
 
-    card.back_card_id = None
+    if existing_unlinked:
 
-    if other:
+        existing_unlinked.quantity += row.quantity
 
-        other.back_card_id = None
+        db.delete(row)
+
+    else:
+
+        row.back_card_id = None
 
     db.commit()
+
+
+def _normalize_finish(finish: str) -> str:
+
+    return (finish or "").strip().lower() or "normal"
+
+
+def _normalize_treatment(treatment: str) -> str:
+
+    return (treatment or "").strip().lower() or "regular"
+
+
+def find_unlinked_inventory_row(
+    db: Session,
+    card_id: int,
+    finish: str,
+    treatment: str,
+):
+    """The one (guaranteed-unique, per the partial index) inventory
+    row for this card/finish/treatment that isn't linked to a back
+    face yet — i.e. the row a plain add_card_to_collection call just
+    touched, before any back-face linking is applied to it.
+    """
+
+    return (
+        db.query(Inventory)
+        .filter(
+            Inventory.card_id == card_id,
+            Inventory.finish == finish,
+            Inventory.treatment == treatment,
+            Inventory.back_card_id.is_(None),
+        )
+        .first()
+    )
 
 
 def add_card_to_collection(
@@ -501,19 +596,9 @@ def add_card_to_collection(
         .strip()
     )
 
-    finish = (
-        finish
-        .strip()
-        .lower()
-        or "normal"
-    )
+    finish = _normalize_finish(finish)
 
-    treatment = (
-        treatment
-        .strip()
-        .lower()
-        or "regular"
-    )
+    treatment = _normalize_treatment(treatment)
 
 
     if quantity <= 0:
@@ -542,19 +627,8 @@ def add_card_to_collection(
         )
 
 
-    inventory = (
-        db.query(Inventory)
-        .filter(
-            Inventory.card_id ==
-                card.id,
-
-            Inventory.finish ==
-                finish,
-
-            Inventory.treatment ==
-                treatment,
-        )
-        .first()
+    inventory = find_unlinked_inventory_row(
+        db, card.id, finish, treatment
     )
 
 
@@ -630,9 +704,18 @@ def add_card(
 
         if front_card and back_card:
 
-            link_back_face(
-                db, front_card.id, back_card.id
+            source_row = find_unlinked_inventory_row(
+                db,
+                front_card.id,
+                _normalize_finish(finish),
+                _normalize_treatment(treatment),
             )
+
+            if source_row:
+
+                link_back_face(
+                    db, source_row.id, back_card.id
+                )
 
 
     if not success:
@@ -687,6 +770,8 @@ def bulk_add(
 
     row_back_number: List[str] = Form(default=[]),
 
+    row_back_set_code: List[str] = Form(default=[]),
+
     quantity: List[str] = Form(default=[]),
 
     deck_choice: str = Form(""),
@@ -719,12 +804,20 @@ def bulk_add(
 
     results = []
 
-    for number, qty_raw, row_finish_val, row_set_code_val, row_back_val in zip(
+    for (
+        number,
+        qty_raw,
+        row_finish_val,
+        row_set_code_val,
+        row_back_val,
+        row_back_set_val,
+    ) in zip(
         collector_number,
         quantity,
         row_finish,
         row_set_code,
         row_back_number,
+        row_back_set_code,
     ):
 
         number = number.strip()
@@ -796,13 +889,25 @@ def bulk_add(
 
         if success and back_number and card:
 
+            effective_back_set_code = (
+                row_back_set_val.strip()
+                or effective_set_code
+            ).upper().strip()
+
             back_card = get_or_create_card(
-                db, effective_set_code, back_number
+                db, effective_back_set_code, back_number
             )
 
-            if back_card:
+            source_row = find_unlinked_inventory_row(
+                db,
+                card.id,
+                _normalize_finish(effective_finish),
+                _normalize_treatment(treatment),
+            )
 
-                link_back_face(db, card.id, back_card.id)
+            if back_card and source_row:
+
+                link_back_face(db, source_row.id, back_card.id)
 
                 message = f"{message} (linked back face #{back_number})"
 
@@ -855,10 +960,10 @@ def build_collection_query(
 
     query = (
         db.query(Inventory)
-        .join(Card)
+        .join(Card, Inventory.card_id == Card.id)
         .outerjoin(
             BackCard,
-            Card.back_card_id == BackCard.id,
+            Inventory.back_card_id == BackCard.id,
         )
     )
 
@@ -878,7 +983,7 @@ def build_collection_query(
     if has_back:
 
         query = query.filter(
-            Card.back_card_id.isnot(None)
+            Inventory.back_card_id.isnot(None)
         )
 
 
@@ -1477,25 +1582,14 @@ def owned_quantity_for_card(
     db: Session,
     card_id: int,
 ):
-    """Total copies owned of a card. If it's linked as one face of a
-    double-sided token pair, includes the other face's inventory too
-    — normally that's 0 (merge_inventory_rows keeps all of it on the
-    primary side), but checking both sides means deck-building works
-    the same regardless of which face's Card row you're adding.
+    """Total physical copies that have this card printed on them.
+
+    Counts rows where it's the front (Inventory.card_id) as well as
+    rows where it's someone else's linked back face
+    (Inventory.back_card_id) — a linked pair's quantity always lives
+    on the primary side's row, so this makes deck-building work the
+    same regardless of which face's Card id you're adding.
     """
-
-    card = (
-        db.query(Card)
-        .filter(Card.id == card_id)
-        .first()
-    )
-
-    card_ids = [card_id]
-
-    if card and card.back_card_id:
-
-        card_ids.append(card.back_card_id)
-
 
     return (
         db.query(
@@ -1507,8 +1601,9 @@ def owned_quantity_for_card(
             )
         )
         .filter(
-            Inventory.card_id.in_(
-                card_ids
+            or_(
+                Inventory.card_id == card_id,
+                Inventory.back_card_id == card_id,
             )
         )
         .scalar()
@@ -3249,6 +3344,17 @@ def update_details(
     )
 
 
+    # Collision check must stay within the same back-face pairing (or
+    # lack thereof) as the row being edited — otherwise changing
+    # finish/treatment on an unlinked row could silently merge it into
+    # an unrelated, already-linked pairing that just happens to share
+    # a finish/treatment.
+    back_face_match = (
+        Inventory.back_card_id.is_(None)
+        if inventory.back_card_id is None
+        else Inventory.back_card_id == inventory.back_card_id
+    )
+
     existing = (
         db.query(Inventory)
         .filter(
@@ -3260,6 +3366,8 @@ def update_details(
 
             Inventory.treatment ==
                 treatment,
+
+            back_face_match,
 
             Inventory.id !=
                 inventory.id,
@@ -3334,7 +3442,7 @@ def update_back_face(
 
     if not back_collector_number:
 
-        unlink_back_face(db, inventory.card_id)
+        unlink_back_face(db, inventory.id)
 
         return RedirectResponse(
             url="/collection",
@@ -3350,7 +3458,7 @@ def update_back_face(
 
     if back_card:
 
-        link_back_face(db, inventory.card_id, back_card.id)
+        link_back_face(db, inventory.id, back_card.id)
 
 
     return RedirectResponse(
