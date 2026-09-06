@@ -5,11 +5,15 @@ Bracket Folder" button writes these), seeds a random bracket, and
 plays each matchup through forge-sim's /simulate endpoint — the same
 service the main app's Simulate page uses, already parallelized across
 several Forge processes per match. Prints the bracket round by round
-and a final standings list, and saves that same output to a timestamped
-.txt summary plus a structured .json file (both under RESULTS_DIR) —
-the JSON is meant for building a richer visualization from afterward,
-since it has every match/round/standing as data rather than text to
-re-parse.
+and a final standings list, and saves three files under RESULTS_DIR,
+all sharing one timestamped name:
+  bracket_lives{N}_{time}.txt   the same text that printed to the console
+  bracket_lives{N}_{time}.json  every match/round/standing as data
+  bracket_lives{N}_{time}.html  a self-contained report — open it in
+                                 any browser, no server, no internet
+                                 needed beyond loading its two Google
+                                 fonts. Built from report_template.html
+                                 with the JSON above baked in.
 
 Each matchup is best-of-N (11 games by default) rather than a single
 game, so one unlucky draw or mulligan doesn't knock a deck out of the
@@ -63,6 +67,12 @@ FORGE_SIM_URL = os.environ.get(
 DEFAULT_GAMES_PER_MATCH = 11
 
 DEFAULT_LIVES = 1
+
+REPORT_TEMPLATE_PATH = Path(__file__).parent / "report_template.html"
+
+REPORT_DATA_START = "/*__BRACKET_DATA__*/"
+
+REPORT_DATA_END = "/*__END_BRACKET_DATA__*/"
 
 # Generous — forge-sim itself budgets up to ~300s per match internally
 # (parallel workers), plus queueing time behind any other simulation
@@ -400,7 +410,9 @@ def main():
 
     json_path = args.output_dir / f"{summary_stem}.json"
 
-    def save_json(champion_name, eliminated_at, all_decks, aborted=None):
+    html_path = args.output_dir / f"{summary_stem}.html"
+
+    def save_results(champion_name, eliminated_at, all_decks, aborted=None):
 
         standings = None
 
@@ -449,6 +461,22 @@ def main():
 
         json_path.write_text(json.dumps(payload, indent=2) + "\n")
 
+        if REPORT_TEMPLATE_PATH.exists():
+
+            template = REPORT_TEMPLATE_PATH.read_text()
+
+            start = template.index(REPORT_DATA_START) + len(REPORT_DATA_START)
+
+            end = template.index(REPORT_DATA_END)
+
+            html = (
+                template[:start]
+                + json.dumps(payload)
+                + template[end:]
+            )
+
+            html_path.write_text(html)
+
     decks = load_decks()
 
     if len(decks) < 2:
@@ -490,7 +518,7 @@ def main():
 
         log.save(summary_path)
 
-        save_json(None, {}, None, aborted=str(error))
+        save_results(None, {}, None, aborted=str(error))
 
         print(f"\nPartial results saved to {summary_path}")
 
@@ -524,11 +552,13 @@ def main():
 
     log.save(summary_path)
 
-    save_json(champion["name"], eliminated_at, all_decks)
+    save_results(champion["name"], eliminated_at, all_decks)
 
     print(f"\nSummary saved to {summary_path}")
 
     print(f"Structured results saved to {json_path}")
+
+    print(f"Open in a browser: {html_path}")
 
 
 if __name__ == "__main__":
