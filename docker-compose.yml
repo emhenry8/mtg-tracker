@@ -37,9 +37,11 @@ services:
     environment:
       FORGE_SIM_URL: http://forge-sim:8000/simulate
       DECKS_DIR: /data/decks
+      RESULTS_DIR: /data/results
 
     volumes:
       - deck_exports:/data/decks:ro
+      - ./bracket-results:/data/results
 
     depends_on:
       - forge-sim

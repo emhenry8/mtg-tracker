@@ -1,5 +1,6 @@
 .env
 postgres_data/
+bracket-results/
 __pycache__/
 *.pyc
 *.pyo
