@@ -6,32 +6,39 @@ plays each matchup through forge-sim's /simulate endpoint — the same
 service the main app's Simulate page uses, already parallelized across
 several Forge processes per match. Prints the bracket round by round
 and a final standings list, and saves that same output to a timestamped
-summary file under RESULTS_DIR.
+.txt summary plus a structured .json file (both under RESULTS_DIR) —
+the JSON is meant for building a richer visualization from afterward,
+since it has every match/round/standing as data rather than text to
+re-parse.
 
 Each matchup is best-of-N (11 games by default) rather than a single
 game, so one unlucky draw or mulligan doesn't knock a deck out of the
 bracket — the deck with more wins across the N games advances.
 
-Two bracket formats (--format):
-  single      Standard single-elimination — one loss and you're out.
-  double-elim Everyone can lose once before being eliminated (out on
-              a 2nd loss), so one unlucky round against the eventual
-              best deck doesn't end your run the way it does in
-              single-elim. This isn't a formally-seeded winners/losers
-              bracket with strict re-entry rules (that has real edge
-              cases for non-power-of-2 fields) — it's a shared pool
-              where everyone keeps playing until they've lost twice,
-              pairing away from repeat matchups where possible. Same
-              practical benefit, much simpler for an arbitrary deck
-              count.
+--lives N controls how many losses a deck can take before being
+eliminated:
+  --lives 1  Standard single-elimination — one loss and you're out.
+  --lives 2  Double-elimination-flavored — out on a 2nd loss, so one
+             unlucky round against the eventual best deck doesn't end
+             your run the way it does at --lives 1.
+  --lives 3+ Same idea, more lives, even more spread before elimination
+             — every extra life roughly doubles total match count for
+             the same field, so weigh that against how long a run you
+             want.
+This is a shared-pool model, not a formally-seeded winners/losers
+bracket with strict re-entry rules (that has real edge cases for
+non-power-of-2 fields) — everyone able to keep playing is repaired
+each round, avoiding a repeat matchup where possible, until only
+enough decks remain under the life cap to call a champion.
 
 Usage (from the repo root, with the stack already up):
     docker compose run --rm bracket
     docker compose run --rm bracket --games 31 --seed 42
-    docker compose run --rm bracket --format double-elim
+    docker compose run --rm bracket --lives 3
 """
 
 import argparse
+import json
 import os
 import random
 import re
@@ -54,6 +61,8 @@ FORGE_SIM_URL = os.environ.get(
 # Best-of-11 by default — override per run with --games. Odd, so a
 # matchup can never end in a tie.
 DEFAULT_GAMES_PER_MATCH = 11
+
+DEFAULT_LIVES = 1
 
 # Generous — forge-sim itself budgets up to ~300s per match internally
 # (parallel workers), plus queueing time behind any other simulation
@@ -152,9 +161,9 @@ def play_match(deck_a, deck_b, games):
     return result
 
 
-def play_and_log_match(deck_a, deck_b, games, rng, log):
-    """Play one match, log the matchup and its result, and return
-    (winner, loser). Shared by both bracket formats.
+def play_and_log_match(deck_a, deck_b, games, round_num, rng, log, events):
+    """Play one match, log the matchup and its result, record a
+    structured event for the JSON export, and return (winner, loser).
     """
 
     log.write(
@@ -164,6 +173,8 @@ def play_and_log_match(deck_a, deck_b, games, rng, log):
     )
 
     result = play_match(deck_a, deck_b, games)
+
+    tied = result["deck_a_wins"] == result["deck_b_wins"]
 
     if result["deck_a_wins"] > result["deck_b_wins"]:
 
@@ -188,34 +199,20 @@ def play_and_log_match(deck_a, deck_b, games, rng, log):
 
         log.write(f"    note: {result['note']}")
 
+    events.append({
+        "type": "match",
+        "round": round_num,
+        "deck_a": deck_a["name"],
+        "deck_b": deck_b["name"],
+        "deck_a_wins": result["deck_a_wins"],
+        "deck_b_wins": result["deck_b_wins"],
+        "winner": winner["name"],
+        "loser": loser["name"],
+        "tied": tied,
+        "note": result.get("note"),
+    })
+
     return winner, loser
-
-
-def run_round(decks, round_num, games, rng, log):
-
-    log.write(f"\n=== Round {round_num} ({len(decks)} decks) ===")
-
-    winners = []
-    losers = []
-
-    pairs = list(zip(decks[0::2], decks[1::2]))
-
-    bye = decks[-1] if len(decks) % 2 else None
-
-    for deck_a, deck_b in pairs:
-
-        winner, loser = play_and_log_match(deck_a, deck_b, games, rng, log)
-
-        winners.append(winner)
-        losers.append(loser)
-
-    if bye:
-
-        log.write(f"  {bye['name']} gets a bye")
-
-        winners.append(bye)
-
-    return winners, losers
 
 
 def make_pairings(pool, played_pairs, rng):
@@ -254,14 +251,15 @@ def make_pairings(pool, played_pairs, rng):
     return pairs, bye
 
 
-def run_double_elim(decks, games, rng, log):
-    """Double-elimination-flavored format: every deck can lose once
-    before being eliminated (out on a 2nd loss). See the module
-    docstring for why this is a simplified shared-pool model rather
-    than a formally-seeded winners/losers bracket.
+def run_survival_bracket(decks, games, lives, rng, log, events):
+    """Play until only one deck has fewer than `lives` losses. Every
+    deck can lose up to (lives - 1) times before elimination —
+    lives=1 is standard single-elimination, lives=2 is the
+    double-elimination-flavored format, and so on. See the module
+    docstring for why this is a shared-pool model rather than a
+    formally-seeded winners/losers bracket.
 
-    Returns (champion, eliminated_at) to match the single-elim shape
-    main() expects for printing standings.
+    Returns (champion, eliminated_at).
     """
 
     losses = {deck["name"]: 0 for deck in decks}
@@ -274,7 +272,7 @@ def run_double_elim(decks, games, rng, log):
 
     while True:
 
-        pool = [deck for deck in decks if losses[deck["name"]] < 2]
+        pool = [deck for deck in decks if losses[deck["name"]] < lives]
 
         if len(pool) <= 1:
 
@@ -282,7 +280,8 @@ def run_double_elim(decks, games, rng, log):
 
         log.write(
             f"\n=== Round {round_num} "
-            f"({len(pool)} decks alive — 2 losses and you're out) ==="
+            f"({len(pool)} decks alive — {lives} loss"
+            f"{'es' if lives != 1 else ''} and you're out) ==="
         )
 
         pairs, bye = make_pairings(pool, played_pairs, rng)
@@ -290,30 +289,44 @@ def run_double_elim(decks, games, rng, log):
         for deck_a, deck_b in pairs:
 
             winner, loser = play_and_log_match(
-                deck_a, deck_b, games, rng, log
+                deck_a, deck_b, games, round_num, rng, log, events
             )
 
             played_pairs.add(frozenset({deck_a["name"], deck_b["name"]}))
 
             losses[loser["name"]] += 1
 
-            if losses[loser["name"]] >= 2:
+            if losses[loser["name"]] >= lives:
 
                 eliminated_at[loser["name"]] = round_num
 
-                log.write(f"    {loser['name']} is eliminated (2nd loss)")
+                log.write(
+                    f"    {loser['name']} is eliminated "
+                    f"({losses[loser['name']]} loss"
+                    f"{'es' if losses[loser['name']] != 1 else ''})"
+                )
 
             else:
 
-                log.write(f"    {loser['name']} drops to 1 loss")
+                log.write(
+                    f"    {loser['name']} drops to "
+                    f"{losses[loser['name']]} loss"
+                    f"{'es' if losses[loser['name']] != 1 else ''}"
+                )
 
         if bye:
 
             log.write(f"  {bye['name']} gets a bye")
 
+            events.append({
+                "type": "bye",
+                "round": round_num,
+                "deck": bye["name"],
+            })
+
         round_num += 1
 
-    survivors = [deck for deck in decks if losses[deck["name"]] < 2]
+    survivors = [deck for deck in decks if losses[deck["name"]] < lives]
 
     champion = survivors[0] if survivors else None
 
@@ -324,8 +337,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         description=(
-            "Run a single-elimination bracket between all decks "
-            "exported by mtg-tracker."
+            "Run a bracket between all decks exported by mtg-tracker."
         )
     )
 
@@ -344,12 +356,14 @@ def main():
     )
 
     parser.add_argument(
-        "--format",
-        choices=["single", "double-elim"],
-        default="single",
+        "--lives",
+        type=int,
+        default=DEFAULT_LIVES,
         help=(
-            "single = standard single-elimination. double-elim = "
-            "everyone can lose once before being eliminated. "
+            "Losses a deck can take before elimination. 1 = standard "
+            "single-elimination, 2 = double-elimination-flavored, "
+            "3+ = even more spread before elimination, at the cost of "
+            "roughly doubling total matches per extra life. "
             "(default: %(default)s)"
         ),
     )
@@ -359,21 +373,81 @@ def main():
         type=Path,
         default=RESULTS_DIR,
         help=(
-            "Directory to save the run summary file in "
+            "Directory to save the run summary files in "
             "(default: %(default)s)"
         ),
     )
 
     args = parser.parse_args()
 
+    if args.lives < 1:
+
+        print("--lives must be at least 1")
+
+        sys.exit(1)
+
     log = RunLog()
+
+    events = []
 
     run_started_at = datetime.now()
 
-    summary_path = (
-        args.output_dir
-        / f"bracket_{args.format}_{run_started_at:%Y%m%d_%H%M%S}.txt"
+    summary_stem = (
+        f"bracket_lives{args.lives}_{run_started_at:%Y%m%d_%H%M%S}"
     )
+
+    summary_path = args.output_dir / f"{summary_stem}.txt"
+
+    json_path = args.output_dir / f"{summary_stem}.json"
+
+    def save_json(champion_name, eliminated_at, all_decks, aborted=None):
+
+        standings = None
+
+        if all_decks is not None:
+
+            def sort_key(deck):
+
+                if deck["name"] == champion_name:
+
+                    return (float("inf"), deck["name"])
+
+                return (
+                    eliminated_at.get(deck["name"], 0),
+                    deck["name"],
+                )
+
+            ordered = sorted(all_decks, key=sort_key, reverse=True)
+
+            standings = [
+                {
+                    "position": position,
+                    "name": deck["name"],
+                    "status": (
+                        "champion"
+                        if deck["name"] == champion_name
+                        else f"eliminated round "
+                        f"{eliminated_at[deck['name']]}"
+                    ),
+                }
+                for position, deck in enumerate(ordered, start=1)
+            ]
+
+        payload = {
+            "started_at": run_started_at.isoformat(),
+            "games_per_match": args.games,
+            "lives": args.lives,
+            "seed": args.seed,
+            "decks": [deck["name"] for deck in (all_decks or [])],
+            "events": events,
+            "champion": champion_name,
+            "standings": standings,
+            "aborted": aborted,
+        }
+
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+
+        json_path.write_text(json.dumps(payload, indent=2) + "\n")
 
     decks = load_decks()
 
@@ -397,48 +471,26 @@ def main():
 
     log.write(
         f"Bracket with {len(decks)} decks, {args.games} games per "
-        f"matchup, format={args.format}:"
+        f"matchup, lives={args.lives}:"
     )
 
     for deck in decks:
 
         log.write(f"  - {deck['name']}")
 
-    champion = None
-
-    eliminated_at = {}
-
-    round_num = 1
-
     try:
 
-        if args.format == "double-elim":
-
-            champion, eliminated_at = run_double_elim(
-                decks, args.games, rng, log
-            )
-
-        else:
-
-            while len(decks) > 1:
-
-                decks, round_losers = run_round(
-                    decks, round_num, args.games, rng, log
-                )
-
-                for loser in round_losers:
-
-                    eliminated_at[loser["name"]] = round_num
-
-                round_num += 1
-
-            champion = decks[0]
+        champion, eliminated_at = run_survival_bracket(
+            decks, args.games, args.lives, rng, log, events
+        )
 
     except (requests.exceptions.RequestException, RuntimeError) as error:
 
         log.write(f"\nBracket aborted: {error}")
 
         log.save(summary_path)
+
+        save_json(None, {}, None, aborted=str(error))
 
         print(f"\nPartial results saved to {summary_path}")
 
@@ -472,7 +524,11 @@ def main():
 
     log.save(summary_path)
 
+    save_json(champion["name"], eliminated_at, all_decks)
+
     print(f"\nSummary saved to {summary_path}")
+
+    print(f"Structured results saved to {json_path}")
 
 
 if __name__ == "__main__":
