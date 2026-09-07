@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Bracket</h1>
+
+<div class="card">
+
+    <p class="muted">
+        No bracket has been run yet. Run one from the host with:
+    </p>
+
+    <pre style="background: #f4f4f4; padding: 12px; border-radius: 6px; overflow-x: auto;">./run-bracket.sh --lives 3 --games 51</pre>
+
+    <p class="muted">
+        Once a run finishes, this page will show the most recent result.
+    </p>
+
+</div>
+
+{% endblock %}

@@ -10,9 +10,11 @@ services:
 
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      BRACKET_RESULTS_DIR: /data/bracket-results
 
     volumes:
       - deck_exports:/data/decks
+      - ./bracket-results:/data/bracket-results:ro
 
     depends_on:
       postgres:
