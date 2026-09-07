@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Bracket History</h1>
+
+<p class="muted">
+    <a href="/bracket">← Back to the latest run</a>
+</p>
+
+<div class="card">
+
+    {% if runs %}
+
+    <table>
+
+        <thead>
+
+            <tr>
+                <th>Run</th>
+                <th>Decks</th>
+                <th>Games / Matchup</th>
+                <th>Lives</th>
+                <th>Champion</th>
+            </tr>
+
+        </thead>
+
+        <tbody>
+
+        {% for run in runs %}
+
+            <tr>
+
+                <td>
+                    <a href="/bracket/{{ run.stem }}">
+                        {{ run.started_at or run.stem }}
+                    </a>
+                </td>
+
+                <td>
+                    {{ run.deck_count if run.deck_count is not none else "—" }}
+                </td>
+
+                <td>
+                    {{ run.games_per_match if run.games_per_match is not none else "—" }}
+                </td>
+
+                <td>
+                    {{ run.lives if run.lives is not none else "—" }}
+                </td>
+
+                <td>
+                    {% if run.aborted %}
+                        <span class="muted">Aborted — {{ run.aborted }}</span>
+                    {% else %}
+                        {{ run.champion or "—" }}
+                    {% endif %}
+                </td>
+
+            </tr>
+
+        {% endfor %}
+
+        </tbody>
+
+    </table>
+
+    {% else %}
+
+    <p class="muted">
+        No bracket runs found yet.
+    </p>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}
